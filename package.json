@@ -1,0 +1,45 @@
+{
+	"name": "octl",
+	"version": "1.0.0",
+	"description": "Olympus CLI — automated setup for the OlympusOSS Identity Platform",
+	"type": "module",
+	"bin": {
+		"octl": "dist/index.js"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"octl": "tsx src/index.ts",
+		"build": "tsc",
+		"dev": "tsx src/index.ts",
+		"lint": "biome check",
+		"lint:fix": "biome check --write",
+		"typecheck": "tsc --noEmit",
+		"prepublishOnly": "npm run lint && npm run typecheck && npm run build"
+	},
+	"keywords": [
+		"cli",
+		"olympus",
+		"identity",
+		"ory",
+		"setup",
+		"iam",
+		"ciam"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bnannier/OlympusOSS.git",
+		"directory": "cli"
+	},
+	"license": "MIT",
+	"dependencies": {
+		"@inquirer/prompts": "^7.5.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.11",
+		"@types/node": "^22.15.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.9.3"
+	}
+}
