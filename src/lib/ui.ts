@@ -20,10 +20,10 @@ const YELLOW = c("\x1b[33m");
 const CYAN = c("\x1b[36m");
 const RED = c("\x1b[31m");
 const MAGENTA = c("\x1b[35m");
-const BLUE = c("\x1b[34m");
+const _BLUE = c("\x1b[34m");
 const WHITE = c("\x1b[37m");
-const BG_CYAN = c("\x1b[46m");
-const BG_BLUE = c("\x1b[44m");
+const _BG_CYAN = c("\x1b[46m");
+const _BG_BLUE = c("\x1b[44m");
 
 // ─── Inline colour helpers (exported for use in prompts & messages) ────────
 
@@ -141,8 +141,7 @@ export function table(headers: string[], rows: string[][]): void {
 	const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)));
 
 	const sep = widths.map((w) => "─".repeat(w + 2)).join("┼");
-	const formatHeader = (row: string[]) =>
-		row.map((cell, i) => ` ${BOLD}${CYAN}${(cell ?? "").padEnd(widths[i])}${RESET} `).join(`${DIM}│${RESET}`);
+	const formatHeader = (row: string[]) => row.map((cell, i) => ` ${BOLD}${CYAN}${(cell ?? "").padEnd(widths[i])}${RESET} `).join(`${DIM}│${RESET}`);
 	const formatRow = (row: string[]) => row.map((cell, i) => ` ${(cell ?? "").padEnd(widths[i])} `).join(`${DIM}│${RESET}`);
 
 	console.log(`  ${DIM}${sep}${RESET}`);

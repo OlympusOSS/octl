@@ -1,7 +1,7 @@
 import { input } from "@inquirer/prompts";
-import type { SetupContext } from "../types.js";
 import * as github from "../lib/github.js";
 import * as ui from "../lib/ui.js";
+import type { SetupContext } from "../types.js";
 
 /**
  * Step 4 — GitHub Environment: create the production environment.

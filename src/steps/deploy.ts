@@ -1,12 +1,12 @@
 import { confirm } from "@inquirer/prompts";
-import type { SetupContext } from "../types.js";
 import * as github from "../lib/github.js";
 import * as ui from "../lib/ui.js";
+import type { SetupContext } from "../types.js";
 
 /**
  * Step 7 — Deploy: trigger the GitHub Actions deploy workflow.
  */
-export async function run(ctx: SetupContext): Promise<void> {
+export async function run(_ctx: SetupContext): Promise<void> {
 	const proceed = await confirm({
 		message: `Trigger the ${ui.bold("deploy workflow")} now?`,
 		default: true,

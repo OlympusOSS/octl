@@ -16,7 +16,7 @@ export function exec(command: string, args: string[] = [], options?: { stdin?: s
 			resolve({
 				stdout: stdout.toString().trim(),
 				stderr: stderr.toString().trim(),
-				exitCode: error ? (error as any).code ?? 1 : 0,
+				exitCode: error ? ((error as any).code ?? 1) : 0,
 			});
 		});
 

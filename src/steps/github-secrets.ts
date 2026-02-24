@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { input, password } from "@inquirer/prompts";
-import type { SetupContext } from "../types.js";
 import { deriveAllSecrets } from "../lib/crypto.js";
 import * as github from "../lib/github.js";
 import * as ui from "../lib/ui.js";
+import type { SetupContext } from "../types.js";
 
 const ENV = "production";
 

@@ -1,11 +1,10 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { confirm, input, select } from "@inquirer/prompts";
-import type { SetupContext } from "../types.js";
 import { commandExists, exec, execOrThrow, installHint } from "../lib/shell.js";
 import * as ui from "../lib/ui.js";
+import type { SetupContext } from "../types.js";
 
 const SSH_KEY_NAME = "olympusoss-deploy";
 const CLOUD_INIT = `#cloud-config
@@ -96,7 +95,24 @@ async function createDroplet(ctx: SetupContext): Promise<void> {
 
 	const result = await execOrThrow(
 		"doctl",
-		["compute", "droplet", "create", name, "--region", region, "--image", "ubuntu-24-04-x64", "--size", size, "--user-data-file", tmpInit, "--wait", "--format", "ID,PublicIPv4", "--no-header"],
+		[
+			"compute",
+			"droplet",
+			"create",
+			name,
+			"--region",
+			region,
+			"--image",
+			"ubuntu-24-04-x64",
+			"--size",
+			size,
+			"--user-data-file",
+			tmpInit,
+			"--wait",
+			"--format",
+			"ID,PublicIPv4",
+			"--no-header",
+		],
 		{ timeout: 180_000 },
 	);
 
@@ -160,7 +176,13 @@ async function copySshKey(ctx: SetupContext): Promise<void> {
 	const hasSshCopyId = await commandExists("ssh-copy-id");
 
 	if (hasSshCopyId) {
-		const result = await exec("ssh-copy-id", ["-i", ctx.sshPublicKeyPath, "-o", "StrictHostKeyChecking=accept-new", `${ctx.sshUser}@${ctx.dropletIp}`]);
+		const result = await exec("ssh-copy-id", [
+			"-i",
+			ctx.sshPublicKeyPath,
+			"-o",
+			"StrictHostKeyChecking=accept-new",
+			`${ctx.sshUser}@${ctx.dropletIp}`,
+		]);
 		if (result.exitCode === 0) {
 			ui.success("SSH key installed on Droplet");
 			return;

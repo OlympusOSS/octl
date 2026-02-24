@@ -1,6 +1,6 @@
 import { confirm, input } from "@inquirer/prompts";
-import type { SetupContext } from "../types.js";
 import * as ui from "../lib/ui.js";
+import type { SetupContext } from "../types.js";
 
 const HOSTINGER_API = "https://api.hostinger.com/api/dns/v1";
 

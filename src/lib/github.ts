@@ -20,7 +20,7 @@ export async function ensureGhAuth(): Promise<string> {
  * Falls back to null if it can't be determined.
  */
 export async function detectRepo(): Promise<{ owner: string; name: string } | null> {
-	const result = await exec("gh", ["repo", "view", "--json", "owner,name", "--jq", ".owner.login + \"/\" + .name"]);
+	const result = await exec("gh", ["repo", "view", "--json", "owner,name", "--jq", '.owner.login + "/" + .name']);
 	if (result.exitCode !== 0 || !result.stdout.includes("/")) {
 		return null;
 	}
@@ -34,13 +34,7 @@ export async function detectRepo(): Promise<{ owner: string; name: string } | nu
  */
 export async function createEnvironment(owner: string, repo: string, environment: string): Promise<boolean> {
 	// PUT is idempotent — creates if missing, no-op if exists
-	const result = await exec("gh", [
-		"api",
-		"--method",
-		"PUT",
-		`repos/${owner}/${repo}/environments/${environment}`,
-		"--silent",
-	]);
+	const result = await exec("gh", ["api", "--method", "PUT", `repos/${owner}/${repo}/environments/${environment}`, "--silent"]);
 	return result.exitCode === 0;
 }
 

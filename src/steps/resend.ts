@@ -1,6 +1,6 @@
 import { input } from "@inquirer/prompts";
-import type { DnsRecord, SetupContext } from "../types.js";
 import * as ui from "../lib/ui.js";
+import type { DnsRecord, SetupContext } from "../types.js";
 
 const RESEND_API = "https://api.resend.com";
 

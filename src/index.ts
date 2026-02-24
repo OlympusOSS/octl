@@ -5,19 +5,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { checkbox, confirm, input, password } from "@inquirer/prompts";
-import * as ui from "./lib/ui.js";
-import { commandExists, installHint } from "./lib/shell.js";
-import { type SetupContext, type StepId, createEmptyContext } from "./types.js";
 import { deriveAllSecrets } from "./lib/crypto.js";
-
-// Step modules
-import * as resendStep from "./steps/resend.js";
-import * as hostingerStep from "./steps/hostinger.js";
+import { commandExists, installHint } from "./lib/shell.js";
+import * as ui from "./lib/ui.js";
+import * as deployStep from "./steps/deploy.js";
 import * as dropletStep from "./steps/droplet.js";
 import * as githubEnvStep from "./steps/github-env.js";
 import * as githubSecretsStep from "./steps/github-secrets.js";
 import * as githubVarsStep from "./steps/github-vars.js";
-import * as deployStep from "./steps/deploy.js";
+import * as hostingerStep from "./steps/hostinger.js";
+// Step modules
+import * as resendStep from "./steps/resend.js";
+import { createEmptyContext, type SetupContext, type StepId } from "./types.js";
 
 interface Step {
 	id: StepId;
@@ -187,9 +186,7 @@ async function main(): Promise<void> {
 				});
 
 				if (!cont) {
-					ui.info(
-						`Exiting. You can re-run ${ui.cmd("octl")} and select only the remaining steps.`,
-					);
+					ui.info(`Exiting. You can re-run ${ui.cmd("octl")} and select only the remaining steps.`);
 					process.exit(1);
 				}
 
@@ -301,31 +298,17 @@ function saveSettings(ctx: SetupContext): void {
 
 	// ─── 2. GitHub Environment ──────────────────────────────────────────────
 
-	lines.push(
-		"---",
-		"",
-		"## 2. GitHub Environment",
-		"",
-	);
+	lines.push("---", "", "## 2. GitHub Environment", "");
 
 	if (repo) {
 		lines.push(`> https://github.com/${repo}/settings/environments`);
 	}
 
-	lines.push(
-		"",
-		'Create a `production` environment: **Settings → Environments → New environment** → name it `production`.',
-		"",
-	);
+	lines.push("", "Create a `production` environment: **Settings → Environments → New environment** → name it `production`.", "");
 
 	// ─── 3. GitHub Environment Secrets ───────────────────────────────────────
 
-	lines.push(
-		"---",
-		"",
-		"## 3. GitHub Environment Secrets",
-		"",
-	);
+	lines.push("---", "", "## 3. GitHub Environment Secrets", "");
 
 	if (ghSecretsUrl) {
 		lines.push(`> ${ghSecretsUrl}`);
@@ -402,12 +385,7 @@ function saveSettings(ctx: SetupContext): void {
 
 	// ─── 4. GitHub Environment Variables ─────────────────────────────────────
 
-	lines.push(
-		"---",
-		"",
-		"## 4. GitHub Environment Variables",
-		"",
-	);
+	lines.push("---", "", "## 4. GitHub Environment Variables", "");
 
 	if (ghVarsUrl) {
 		lines.push(`> ${ghVarsUrl}`);
@@ -458,12 +436,7 @@ function saveSettings(ctx: SetupContext): void {
 
 	// ─── 5. GitHub Repository Secrets ────────────────────────────────────────
 
-	lines.push(
-		"---",
-		"",
-		"## 5. GitHub Repository Secrets",
-		"",
-	);
+	lines.push("---", "", "## 5. GitHub Repository Secrets", "");
 
 	if (repo) {
 		lines.push(`> https://github.com/${repo}/settings/secrets/actions`);
@@ -481,14 +454,7 @@ function saveSettings(ctx: SetupContext): void {
 
 	// ─── 6. DigitalOcean Droplet ─────────────────────────────────────────────
 
-	lines.push(
-		"---",
-		"",
-		"## 6. DigitalOcean Droplet",
-		"",
-		"> https://cloud.digitalocean.com/droplets",
-		"",
-	);
+	lines.push("---", "", "## 6. DigitalOcean Droplet", "", "> https://cloud.digitalocean.com/droplets", "");
 
 	if (ctx.dropletIp) {
 		lines.push(`Droplet IP: \`${ctx.dropletIp}\``);
@@ -496,7 +462,9 @@ function saveSettings(ctx: SetupContext): void {
 	if (ctx.sshPublicKeyPath) {
 		lines.push("", `Add the deploy public key to the Droplet's \`~/.ssh/authorized_keys\`:`, "");
 		lines.push("```");
-		lines.push(`cat ${ctx.sshPublicKeyPath} | ssh ${ctx.sshUser || "root"}@${ctx.dropletIp || "DROPLET_IP"} "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"`);
+		lines.push(
+			`cat ${ctx.sshPublicKeyPath} | ssh ${ctx.sshUser || "root"}@${ctx.dropletIp || "DROPLET_IP"} "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"`,
+		);
 		lines.push("```");
 	}
 
