@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { confirm, input, select } from "@inquirer/prompts";
+import { lookupDropletIp } from "../lib/digitalocean.js";
 import { commandExists, exec, execOrThrow, installHint } from "../lib/shell.js";
 import * as ui from "../lib/ui.js";
 import type { SetupContext } from "../types.js";
@@ -25,22 +26,23 @@ runcmd:
  * - Copies public key to Droplet
  */
 export async function run(ctx: SetupContext): Promise<void> {
-	const mode = await select({
-		message: `${ui.cyan("DigitalOcean Droplet")}:`,
-		choices: [
-			{ name: `${ui.bold("Use existing")} ${ui.dim("— connect to an existing Droplet")}`, value: "existing" },
-			{ name: `${ui.bold("Create new")} ${ui.dim("— provision via doctl")}`, value: "new" },
-		],
-	});
-
-	if (mode === "new") {
-		await createDroplet(ctx);
+	// If a previous step (e.g. Hostinger) already resolved the IP, skip straight to SSH setup
+	if (ctx.dropletIp) {
+		ui.skip(`Droplet already resolved: ${ui.host(ctx.dropletIp)}${ctx.dropletName ? ` (${ui.bold(ctx.dropletName)})` : ""}`);
 	} else {
-		ctx.dropletIp = await input({
-			message: `${ui.cyan("Droplet public IP")} address:`,
-			default: ctx.dropletIp || undefined,
-			validate: (v) => (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v) ? true : "Enter a valid IPv4 address"),
+		const mode = await select({
+			message: `${ui.cyan("DigitalOcean Droplet")}:`,
+			choices: [
+				{ name: `${ui.bold("Use existing")} ${ui.dim("— connect to an existing Droplet")}`, value: "existing" },
+				{ name: `${ui.bold("Create new")} ${ui.dim("— provision via doctl")}`, value: "new" },
+			],
 		});
+
+		if (mode === "new") {
+			await createDroplet(ctx);
+		} else {
+			await lookupExistingDroplet(ctx);
+		}
 	}
 
 	ctx.sshUser = await input({
@@ -55,17 +57,22 @@ export async function run(ctx: SetupContext): Promise<void> {
 	await copySshKey(ctx);
 }
 
+async function lookupExistingDroplet(ctx: SetupContext): Promise<void> {
+	const name = await input({
+		message: `${ui.cyan("Droplet name")}:`,
+		default: "olympusoss-prod",
+	});
+
+	ui.info(`Looking up Droplet ${ui.bold(name)}...`);
+	const ip = await lookupDropletIp(ctx.doToken, name);
+	ctx.dropletName = name;
+	ctx.dropletIp = ip;
+	ui.success(`Found Droplet ${ui.bold(name)} at ${ui.host(ip)}`);
+}
+
 async function createDroplet(ctx: SetupContext): Promise<void> {
 	if (!(await commandExists("doctl"))) {
 		throw new Error(`${ui.cmd("doctl")} (DigitalOcean CLI) is required to create a Droplet. Install: ${ui.cmd(installHint("doctl"))}`);
-	}
-
-	if (!ctx.doToken) {
-		ui.info(`Create an API token at: ${ui.url("https://cloud.digitalocean.com/account/api/tokens")}`);
-		ctx.doToken = await input({
-			message: `${ui.cyan("DigitalOcean API token")}:`,
-			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
-		});
 	}
 
 	// Authenticate doctl
@@ -123,6 +130,7 @@ async function createDroplet(ctx: SetupContext): Promise<void> {
 		throw new Error(`Could not parse Droplet IP from doctl output: ${result}`);
 	}
 
+	ctx.dropletName = name;
 	ctx.dropletIp = ip;
 	ui.success(`Droplet created: ${ui.bold(name)} (${ui.host(ip)})`);
 

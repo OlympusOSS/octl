@@ -1,4 +1,3 @@
-import { input } from "@inquirer/prompts";
 import * as ui from "../lib/ui.js";
 import type { DnsRecord, SetupContext } from "../types.js";
 
@@ -12,15 +11,6 @@ const RESEND_API = "https://api.resend.com";
  * - Stores DNS records on context for Hostinger step
  */
 export async function run(ctx: SetupContext): Promise<void> {
-	// Prompt for API key if not provided by a prior step
-	if (!ctx.resendApiKey) {
-		ui.info(`Create an API key at: ${ui.url("https://resend.com/api-keys")}`);
-		ctx.resendApiKey = await input({
-			message: `${ui.cyan("Resend API key")} ${ui.dim("(starts with re_)")}:`,
-			validate: (v) => (v.startsWith("re_") ? true : "API key must start with re_"),
-		});
-	}
-
 	const headers = {
 		Authorization: `Bearer ${ctx.resendApiKey}`,
 		"Content-Type": "application/json",
@@ -72,7 +62,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 	ctx.resendDnsRecords = records;
 
 	if (records.length > 0) {
-		ui.info("DNS records to add (will be used in Hostinger step):");
+		ui.info("DNS records to add at your DNS provider:");
 		ui.table(
 			["Type", "Name", "Value"],
 			records.map((r) => [r.type, r.name, r.value.length > 60 ? `${r.value.substring(0, 57)}...` : r.value]),

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { emitKeypressEvents } from "node:readline";
@@ -8,12 +8,11 @@ import { checkbox, confirm, input, password } from "@inquirer/prompts";
 import { deriveAllSecrets } from "./lib/crypto.js";
 import { commandExists, installHint } from "./lib/shell.js";
 import * as ui from "./lib/ui.js";
-import * as deployStep from "./steps/deploy.js";
 import * as dropletStep from "./steps/droplet.js";
 import * as githubEnvStep from "./steps/github-env.js";
 import * as githubSecretsStep from "./steps/github-secrets.js";
 import * as githubVarsStep from "./steps/github-vars.js";
-import * as hostingerStep from "./steps/hostinger.js";
+import * as neonStep from "./steps/neon.js";
 // Step modules
 import * as resendStep from "./steps/resend.js";
 import { createEmptyContext, type SetupContext, type StepId } from "./types.js";
@@ -24,7 +23,7 @@ interface Step {
 	description: string;
 	run: (ctx: SetupContext) => Promise<void>;
 	/** Which common inputs this step requires. */
-	needs: ("domain" | "passphrase" | "adminPassword" | "includeDemo")[];
+	needs: ("domain" | "passphrase" | "adminPassword" | "includeSite")[];
 }
 
 const STEPS: Step[] = [
@@ -36,11 +35,11 @@ const STEPS: Step[] = [
 		needs: ["domain"],
 	},
 	{
-		id: "hostinger",
-		label: "Hostinger",
-		description: "DNS records — A records + email DNS",
-		run: hostingerStep.run,
-		needs: ["domain"],
+		id: "neon",
+		label: "Neon",
+		description: "Managed PostgreSQL — create project + databases",
+		run: neonStep.run,
+		needs: [],
 	},
 	{
 		id: "droplet",
@@ -61,23 +60,25 @@ const STEPS: Step[] = [
 		label: "GitHub Secrets",
 		description: "Derive + set all secrets",
 		run: githubSecretsStep.run,
-		needs: ["domain", "passphrase", "adminPassword", "includeDemo"],
+		needs: ["domain", "adminPassword", "includeSite"],
 	},
 	{
 		id: "github-vars",
 		label: "GitHub Variables",
 		description: "Compute + set all variables",
 		run: githubVarsStep.run,
-		needs: ["domain", "includeDemo"],
-	},
-	{
-		id: "deploy",
-		label: "Deploy",
-		description: "Trigger deploy workflow",
-		run: deployStep.run,
-		needs: [],
+		needs: ["domain", "includeSite"],
 	},
 ];
+
+// Module-level ref so exit handlers can save progress
+let activeCtx: SetupContext | null = null;
+
+function saveOnExit(): void {
+	if (activeCtx && (activeCtx.domain || activeCtx.passphrase || activeCtx.doToken)) {
+		saveSettings(activeCtx, true);
+	}
+}
 
 function setupEscapeHandler(): void {
 	// Enable keypress events on stdin so we can detect Escape
@@ -86,6 +87,7 @@ function setupEscapeHandler(): void {
 	process.stdin.on("keypress", (_ch: string, key: { name: string }) => {
 		if (key?.name === "escape") {
 			console.log("\n");
+			saveOnExit();
 			ui.info("Setup cancelled.");
 			process.exit(0);
 		}
@@ -113,7 +115,9 @@ async function main(): Promise<void> {
 	});
 
 	const ctx = createEmptyContext();
+	loadPreviousContext(ctx);
 	ctx.selectedSteps = selectedIds;
+	activeCtx = ctx;
 
 	const selectedSteps = STEPS.filter((s) => selectedIds.includes(s.id));
 
@@ -123,40 +127,128 @@ async function main(): Promise<void> {
 	if (allNeeds.has("domain")) {
 		ctx.domain = await input({
 			message: `${ui.cyan("Domain name")} ${ui.dim("(e.g. example.com)")}:`,
+			default: ctx.domain || undefined,
 			validate: (v) => (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(v) ? true : "Enter a valid domain name"),
 		});
-		ctx.adminEmail = `admin@${ctx.domain}`;
+		saveSettings(ctx, true);
 	}
 
-	if (allNeeds.has("passphrase")) {
+	// Always collect passphrase — it's the master key for the whole platform
+	while (true) {
 		ctx.passphrase = await password({
 			message: `${ui.cyan("Passphrase")} ${ui.dim("(used to derive all secrets — remember this!)")}:`,
 			validate: (v) => (v.length >= 8 ? true : "Passphrase must be at least 8 characters"),
 		});
 
-		// Confirm passphrase
-		const confirm2 = await password({ message: `${ui.cyan("Confirm passphrase")}:` });
-		if (confirm2 !== ctx.passphrase) {
-			ui.error("Passphrases do not match. Exiting.");
-			process.exit(1);
+		const confirmPass = await password({ message: `${ui.cyan("Confirm passphrase")}:` });
+		if (confirmPass === ctx.passphrase) break;
+
+		ui.error("Passphrases do not match.");
+		const retry = await confirm({
+			message: "Would you like to try again?",
+			default: true,
+		});
+		if (!retry) {
+			ui.info("Exiting.");
+			process.exit(0);
 		}
 	}
 
+	saveSettings(ctx, true);
+
 	if (allNeeds.has("adminPassword")) {
+		ctx.adminEmail = await input({
+			message: `${ui.cyan("Admin email")} ${ui.dim("(for initial IAM admin identity)")}:`,
+			default: ctx.adminEmail || (ctx.domain ? `admin@${ctx.domain}` : undefined),
+			validate: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? true : "Enter a valid email address"),
+		});
+		saveSettings(ctx, true);
+
 		ctx.adminPassword = await password({
 			message: `${ui.cyan("Admin password")} ${ui.dim("(for initial IAM admin identity)")}:`,
 			validate: (v) => (v.length >= 8 ? true : "Password must be at least 8 characters"),
 		});
+		saveSettings(ctx, true);
 	}
 
-	if (allNeeds.has("includeDemo")) {
-		ctx.includeDemo = await confirm({
-			message: `Include ${ui.bold("demo app")}?`,
+	if (allNeeds.has("includeSite")) {
+		ctx.includeSite = await confirm({
+			message: `Include ${ui.bold("site")} OAuth2 clients?`,
 			default: false,
 		});
+		saveSettings(ctx, true);
+	}
+
+	// ── Collect GitHub repo if any GitHub steps are selected ─────────────
+
+	const needsRepo = selectedIds.some((id) => id.startsWith("github-"));
+	if (needsRepo) {
+		const defaultRepo = ctx.repoOwner && ctx.repoName ? `${ctx.repoOwner}/${ctx.repoName}` : undefined;
+		const slug = await input({
+			message: `${ui.cyan("GitHub repo")} ${ui.dim("(owner/name)")}:`,
+			default: defaultRepo,
+			validate: (v) => (v.includes("/") ? true : "Format: owner/name"),
+		});
+		const [owner, name] = slug.split("/");
+		ctx.repoOwner = owner;
+		ctx.repoName = name;
+		saveSettings(ctx, true);
+	}
+
+	// ── Collect tokens & API keys upfront based on selected steps ────────
+
+	const needsResendKey = selectedIds.includes("resend") || selectedIds.includes("github-secrets");
+	const needsNeonToken = selectedIds.includes("neon") || selectedIds.includes("github-secrets");
+	const needsDoToken = selectedIds.includes("droplet");
+	const needsGhcrPat = selectedIds.includes("github-secrets");
+
+	if (needsResendKey) {
+		ui.info(`Create an API key at: ${ui.url("https://resend.com/api-keys")}`);
+		ctx.resendApiKey = await input({
+			message: `${ui.cyan("Resend API key")} ${ui.dim("(starts with re_)")}:`,
+			default: ctx.resendApiKey || undefined,
+			validate: (v) => (v.startsWith("re_") ? true : "API key must start with re_"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	if (needsNeonToken) {
+		ui.info(`Create an API key at: ${ui.url("https://console.neon.tech/app/settings/api-keys")}`);
+		ctx.neonApiToken = await input({
+			message: `${ui.cyan("Neon API token")}:`,
+			default: ctx.neonApiToken || undefined,
+			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	if (needsDoToken) {
+		ui.info(`Create an API token at: ${ui.url("https://cloud.digitalocean.com/account/api/tokens")}`);
+		ctx.doToken = await input({
+			message: `${ui.cyan("DigitalOcean API token")}:`,
+			default: ctx.doToken || undefined,
+			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	if (needsGhcrPat) {
+		ui.info(`Create a PAT at: ${ui.url("https://github.com/settings/tokens")} — scope: ${ui.bold("read:packages")}`);
+		ctx.ghcrPat = await password({
+			message: `${ui.cyan("GitHub PAT")} ${ui.dim("(read:packages)")}:`,
+			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	// Derive all secrets from passphrase and save to octl.json
+	if (ctx.passphrase) {
+		ctx.derivedSecrets = deriveAllSecrets(ctx.passphrase, ctx.includeSite);
+		saveSettings(ctx, true);
 	}
 
 	// Run selected steps
+	const failedStepIds = new Set<StepId>();
 	const total = selectedSteps.length;
 	for (let i = 0; i < selectedSteps.length; i++) {
 		const step = selectedSteps[i];
@@ -167,7 +259,10 @@ async function main(): Promise<void> {
 			try {
 				await step.run(ctx);
 				succeeded = true;
+				saveSettings(ctx, true);
 			} catch (err: any) {
+				// Save whatever the step collected before it failed
+				saveSettings(ctx, true);
 				ui.error(`Step "${ui.bold(step.label)}" failed: ${err.message}`);
 
 				const retry = await confirm({
@@ -190,24 +285,54 @@ async function main(): Promise<void> {
 					process.exit(1);
 				}
 
+				failedStepIds.add(step.id);
 				break;
 			}
 		}
 	}
 
-	// Save settings to file
+	// Final save (loud — shows path to the user)
 	saveSettings(ctx);
 
 	// Summary
 	ui.summaryBox("Setup Complete");
 	if (ctx.domain) ui.keyValue("Domain", ctx.domain);
 	if (ctx.dropletIp) ui.keyValue("Droplet IP", ctx.dropletIp);
+	if (ctx.neonProjectId) ui.keyValue("Neon Project", ctx.neonProjectId);
 	if (ctx.repoOwner) ui.keyValue("Repo", `${ctx.repoOwner}/${ctx.repoName}`);
 	if (ctx.adminEmail) ui.keyValue("Admin email", ctx.adminEmail);
 	console.log("");
 
-	if (ctx.resendDnsRecords.length > 0 && !ctx.hostingerToken) {
-		ui.warn("Don't forget to add Resend DNS records manually in Hostinger!");
+	// Always print DNS setup instructions if we have domain + IP
+	if (ctx.domain && ctx.dropletIp) {
+		ui.info(ui.bold("DNS Records") + ui.dim(" — add these at your DNS provider:"));
+		console.log("");
+
+		ui.info(ui.bold("A Records") + ui.dim(` → all point to ${ctx.dropletIp}`));
+		ui.table(
+			["Type", "Name", "Value", "TTL"],
+			["login.ciam", "login.iam", "oauth.ciam", "oauth.iam", "admin.ciam", "admin.iam", "olympus"].map((sub) => [
+				"A",
+				sub,
+				ctx.dropletIp,
+				"3600",
+			]),
+		);
+		console.log("");
+	}
+
+	if (ctx.resendDnsRecords.length > 0) {
+		ui.info(ui.bold("Resend Email DNS Records"));
+		ui.table(
+			["Type", "Name", "Value", "Priority"],
+			ctx.resendDnsRecords.map((r) => [
+				r.type,
+				r.name || "(root)",
+				r.value.length > 60 ? `${r.value.substring(0, 57)}...` : r.value,
+				r.priority !== undefined ? String(r.priority) : "",
+			]),
+		);
+		console.log("");
 	}
 }
 
@@ -219,296 +344,44 @@ function getSettingsDir(): string {
 	return join(homedir(), "Documents", "octl");
 }
 
-function saveSettings(ctx: SetupContext): void {
+/** Load previously saved context, merging into the given ctx. */
+function loadPreviousContext(ctx: SetupContext): void {
+	const jsonPath = join(getSettingsDir(), "octl.json");
+	if (!existsSync(jsonPath)) return;
+
+	try {
+		const raw = JSON.parse(readFileSync(jsonPath, "utf-8"));
+
+		for (const key of Object.keys(ctx) as (keyof SetupContext)[]) {
+			const current = ctx[key];
+			const saved = raw[key];
+			if (saved === undefined || saved === null) continue;
+
+			// Skip if the current value is already set (non-empty string, non-default)
+			if (typeof current === "string" && current !== "") continue;
+			if (key === "resendDnsRecords" && Array.isArray(current) && current.length > 0) continue;
+			if (key === "selectedSteps") continue; // always use the current selection
+
+			// @ts-expect-error — dynamic assignment
+			ctx[key] = saved;
+		}
+	} catch {
+		// Corrupt or missing — ignore
+	}
+}
+
+function saveSettings(ctx: SetupContext, quiet = false): void {
 	const octlDir = getSettingsDir();
-	const filePath = join(octlDir, "octl.md");
+	const filePath = join(octlDir, "octl.json");
 
 	if (!existsSync(octlDir)) {
 		mkdirSync(octlDir, { recursive: true });
 	}
 
-	const timestamp = new Date().toISOString();
-	const domain = ctx.domain;
-	const repo = ctx.repoOwner && ctx.repoName ? `${ctx.repoOwner}/${ctx.repoName}` : "";
-	const ghSecretsUrl = repo ? `https://github.com/${repo}/settings/secrets/actions` : "";
-	const ghVarsUrl = repo ? `https://github.com/${repo}/settings/variables/actions` : "";
-
-	// Derive all secrets so we can display them grouped by destination
-	const derived = ctx.passphrase ? deriveAllSecrets(ctx.passphrase, ctx.includeDemo) : {};
-
-	// Compute domain URLs
-	const domainUrls: Record<string, string> = {};
-	if (domain) {
-		domainUrls.CIAM_HERA_PUBLIC_URL = `https://login.ciam.${domain}`;
-		domainUrls.IAM_HERA_PUBLIC_URL = `https://login.iam.${domain}`;
-		domainUrls.CIAM_HYDRA_PUBLIC_URL = `https://oauth.ciam.${domain}`;
-		domainUrls.IAM_HYDRA_PUBLIC_URL = `https://oauth.iam.${domain}`;
-		domainUrls.CIAM_ATHENA_PUBLIC_URL = `https://admin.ciam.${domain}`;
-		domainUrls.IAM_ATHENA_PUBLIC_URL = `https://admin.iam.${domain}`;
-		domainUrls.DEMO_PUBLIC_URL = `https://olympus.${domain}`;
+	writeFileSync(filePath, JSON.stringify(ctx, null, 2), "utf-8");
+	if (!quiet) {
+		ui.success(`Settings saved to ${ui.cmd(filePath)}`);
 	}
-
-	const lines: string[] = [
-		"# Olympus CLI — Setup Reference",
-		"",
-		`> Generated: ${timestamp}`,
-		`> Domain: ${domain || "N/A"}`,
-		`> Steps run: ${ctx.selectedSteps.join(", ") || "none"}`,
-		"",
-		"This file lists every value octl collected or derived, organized by **where it needs to be inserted**. Follow each section in order.",
-		"",
-	];
-
-	// ─── 1. Hostinger DNS ───────────────────────────────────────────────────
-
-	lines.push(
-		"---",
-		"",
-		"## 1. Hostinger DNS",
-		"",
-		"> https://hpanel.hostinger.com → Domains → your domain → DNS / Nameservers → DNS Records",
-		"",
-		"Add each row as a DNS record. For A records, the name is the subdomain.",
-		"",
-	);
-
-	if (domain && ctx.dropletIp) {
-		lines.push("### A Records", "");
-		lines.push("| Type | Name | Value | TTL |");
-		lines.push("|------|------|-------|-----|");
-		for (const sub of ["login.ciam", "login.iam", "oauth.ciam", "oauth.iam", "admin.ciam", "admin.iam", "olympus"]) {
-			lines.push(`| A | \`${sub}\` | \`${ctx.dropletIp}\` | 3600 |`);
-		}
-		lines.push("");
-	}
-
-	if (ctx.resendDnsRecords.length > 0) {
-		lines.push("### Resend Email DNS Records", "");
-		lines.push("| Type | Name | Value |");
-		lines.push("|------|------|-------|");
-		for (const r of ctx.resendDnsRecords) {
-			lines.push(`| ${r.type} | \`${r.name}\` | \`${r.value}\` |`);
-		}
-		lines.push("");
-	}
-
-	if (!ctx.dropletIp && ctx.resendDnsRecords.length === 0) {
-		lines.push("*No DNS records to add (Hostinger/DNS steps were not run).*", "");
-	}
-
-	// ─── 2. GitHub Environment ──────────────────────────────────────────────
-
-	lines.push("---", "", "## 2. GitHub Environment", "");
-
-	if (repo) {
-		lines.push(`> https://github.com/${repo}/settings/environments`);
-	}
-
-	lines.push("", "Create a `production` environment: **Settings → Environments → New environment** → name it `production`.", "");
-
-	// ─── 3. GitHub Environment Secrets ───────────────────────────────────────
-
-	lines.push("---", "", "## 3. GitHub Environment Secrets", "");
-
-	if (ghSecretsUrl) {
-		lines.push(`> ${ghSecretsUrl}`);
-	}
-
-	lines.push(
-		"",
-		"Set each secret under **Settings → Environments → production → Environment secrets**.",
-		"",
-		"| Secret | Value |",
-		"|--------|-------|",
-	);
-
-	// Infrastructure secrets
-	if (ctx.sshPrivateKeyPath) {
-		lines.push(`| \`DEPLOY_SSH_KEY\` | *(contents of \`${ctx.sshPrivateKeyPath}\`)* |`);
-	}
-	lines.push(`| \`DEPLOY_USER\` | \`${ctx.sshUser || "root"}\` |`);
-	if (ctx.dropletIp) {
-		lines.push(`| \`DEPLOY_SERVER_IP\` | \`${ctx.dropletIp}\` |`);
-	}
-	if (ctx.ghcrPat) {
-		lines.push(`| \`GHCR_PAT\` | \`${ctx.ghcrPat}\` |`);
-	}
-
-	// Derived secrets
-	if (derived.POSTGRES_PASSWORD) {
-		lines.push(`| \`POSTGRES_PASSWORD\` | \`${derived.POSTGRES_PASSWORD}\` |`);
-	}
-	if (derived.CIAM_KRATOS_SECRET_COOKIE) {
-		lines.push(`| \`CIAM_KRATOS_SECRET_COOKIE\` | \`${derived.CIAM_KRATOS_SECRET_COOKIE}\` |`);
-	}
-	if (derived.CIAM_KRATOS_SECRET_CIPHER) {
-		lines.push(`| \`CIAM_KRATOS_SECRET_CIPHER\` | \`${derived.CIAM_KRATOS_SECRET_CIPHER}\` |`);
-	}
-	if (derived.IAM_KRATOS_SECRET_COOKIE) {
-		lines.push(`| \`IAM_KRATOS_SECRET_COOKIE\` | \`${derived.IAM_KRATOS_SECRET_COOKIE}\` |`);
-	}
-	if (derived.IAM_KRATOS_SECRET_CIPHER) {
-		lines.push(`| \`IAM_KRATOS_SECRET_CIPHER\` | \`${derived.IAM_KRATOS_SECRET_CIPHER}\` |`);
-	}
-	if (derived.CIAM_HYDRA_SECRET_SYSTEM) {
-		lines.push(`| \`CIAM_HYDRA_SECRET_SYSTEM\` | \`${derived.CIAM_HYDRA_SECRET_SYSTEM}\` |`);
-	}
-	if (derived.CIAM_HYDRA_PAIRWISE_SALT) {
-		lines.push(`| \`CIAM_HYDRA_PAIRWISE_SALT\` | \`${derived.CIAM_HYDRA_PAIRWISE_SALT}\` |`);
-	}
-	if (derived.IAM_HYDRA_SECRET_SYSTEM) {
-		lines.push(`| \`IAM_HYDRA_SECRET_SYSTEM\` | \`${derived.IAM_HYDRA_SECRET_SYSTEM}\` |`);
-	}
-	if (derived.IAM_HYDRA_PAIRWISE_SALT) {
-		lines.push(`| \`IAM_HYDRA_PAIRWISE_SALT\` | \`${derived.IAM_HYDRA_PAIRWISE_SALT}\` |`);
-	}
-	if (ctx.resendApiKey) {
-		lines.push(`| \`RESEND_API_KEY\` | \`${ctx.resendApiKey}\` |`);
-	}
-	if (derived.ATHENA_CIAM_OAUTH_CLIENT_SECRET) {
-		lines.push(`| \`ATHENA_CIAM_OAUTH_CLIENT_SECRET\` | \`${derived.ATHENA_CIAM_OAUTH_CLIENT_SECRET}\` |`);
-	}
-	if (derived.ATHENA_IAM_OAUTH_CLIENT_SECRET) {
-		lines.push(`| \`ATHENA_IAM_OAUTH_CLIENT_SECRET\` | \`${derived.ATHENA_IAM_OAUTH_CLIENT_SECRET}\` |`);
-	}
-	if (derived.DEMO_CIAM_CLIENT_SECRET) {
-		lines.push(`| \`DEMO_CIAM_CLIENT_SECRET\` | \`${derived.DEMO_CIAM_CLIENT_SECRET}\` |`);
-	}
-	if (derived.DEMO_IAM_CLIENT_SECRET) {
-		lines.push(`| \`DEMO_IAM_CLIENT_SECRET\` | \`${derived.DEMO_IAM_CLIENT_SECRET}\` |`);
-	}
-	if (ctx.adminPassword) {
-		lines.push(`| \`ADMIN_PASSWORD\` | \`${ctx.adminPassword}\` |`);
-	}
-
-	lines.push("");
-
-	// ─── 4. GitHub Environment Variables ─────────────────────────────────────
-
-	lines.push("---", "", "## 4. GitHub Environment Variables", "");
-
-	if (ghVarsUrl) {
-		lines.push(`> ${ghVarsUrl}`);
-	}
-
-	lines.push(
-		"",
-		"Set each variable under **Settings → Environments → production → Environment variables**.",
-		"",
-		"| Variable | Value |",
-		"|----------|-------|",
-	);
-
-	// Infrastructure
-	lines.push(`| \`DEPLOY_PATH\` | \`${ctx.deployPath}\` |`);
-	lines.push(`| \`DEPLOY_SSH_PORT\` | \`${ctx.sshPort}\` |`);
-	if (ctx.ghcrUsername) {
-		lines.push(`| \`GHCR_USERNAME\` | \`${ctx.ghcrUsername}\` |`);
-	}
-
-	// Domain URLs
-	for (const [key, value] of Object.entries(domainUrls)) {
-		lines.push(`| \`${key}\` | \`${value}\` |`);
-	}
-
-	// Email
-	if (domain) {
-		lines.push(`| \`SMTP_FROM_EMAIL\` | \`noreply@${domain}\` |`);
-	}
-
-	// OAuth2 client IDs
-	lines.push(`| \`ATHENA_CIAM_OAUTH_CLIENT_ID\` | \`athena-ciam-client\` |`);
-	lines.push(`| \`ATHENA_IAM_OAUTH_CLIENT_ID\` | \`athena-iam-client\` |`);
-	if (ctx.includeDemo) {
-		lines.push(`| \`DEMO_CIAM_CLIENT_ID\` | \`demo-ciam-client\` |`);
-		lines.push(`| \`DEMO_IAM_CLIENT_ID\` | \`demo-iam-client\` |`);
-	}
-
-	// Admin & Image tags
-	if (ctx.adminEmail) {
-		lines.push(`| \`ADMIN_EMAIL\` | \`${ctx.adminEmail}\` |`);
-	}
-	lines.push(`| \`HERA_IMAGE_TAG\` | \`latest\` |`);
-	lines.push(`| \`ATHENA_IMAGE_TAG\` | \`latest\` |`);
-	lines.push(`| \`DEMO_IMAGE_TAG\` | \`latest\` |`);
-
-	lines.push("");
-
-	// ─── 5. GitHub Repository Secrets ────────────────────────────────────────
-
-	lines.push("---", "", "## 5. GitHub Repository Secrets", "");
-
-	if (repo) {
-		lines.push(`> https://github.com/${repo}/settings/secrets/actions`);
-	}
-
-	lines.push(
-		"",
-		"Set these under **Settings → Secrets and variables → Actions → Repository secrets** (not environment-scoped).",
-		"",
-		"| Secret | Value | Notes |",
-		"|--------|-------|-------|",
-		"| `NPM_TOKEN` | *(create at npmjs.com/settings/tokens)* | Type: Automation — needed only for CLI publishing |",
-		"",
-	);
-
-	// ─── 6. DigitalOcean Droplet ─────────────────────────────────────────────
-
-	lines.push("---", "", "## 6. DigitalOcean Droplet", "", "> https://cloud.digitalocean.com/droplets", "");
-
-	if (ctx.dropletIp) {
-		lines.push(`Droplet IP: \`${ctx.dropletIp}\``);
-	}
-	if (ctx.sshPublicKeyPath) {
-		lines.push("", `Add the deploy public key to the Droplet's \`~/.ssh/authorized_keys\`:`, "");
-		lines.push("```");
-		lines.push(
-			`cat ${ctx.sshPublicKeyPath} | ssh ${ctx.sshUser || "root"}@${ctx.dropletIp || "DROPLET_IP"} "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"`,
-		);
-		lines.push("```");
-	}
-
-	lines.push("");
-
-	// ─── 7. Reference: Local Files ──────────────────────────────────────────
-
-	lines.push(
-		"---",
-		"",
-		"## 7. Reference",
-		"",
-		"These values are not inserted anywhere but are useful for reference.",
-		"",
-		"| Setting | Value |",
-		"|---------|-------|",
-		`| Domain | \`${domain}\` |`,
-		`| Admin email | \`${ctx.adminEmail}\` |`,
-		`| Include demo | ${ctx.includeDemo} |`,
-	);
-
-	if (ctx.passphrase) {
-		lines.push(`| Passphrase | \`${ctx.passphrase}\` |`);
-	}
-	if (ctx.sshPrivateKeyPath) {
-		lines.push(`| SSH private key | \`${ctx.sshPrivateKeyPath}\` |`);
-	}
-	if (ctx.sshPublicKeyPath) {
-		lines.push(`| SSH public key | \`${ctx.sshPublicKeyPath}\` |`);
-	}
-	if (repo) {
-		lines.push(`| Repository | \`${repo}\` |`);
-	}
-	if (ctx.hostingerToken) {
-		lines.push(`| Hostinger token | \`${ctx.hostingerToken}\` |`);
-	}
-	if (ctx.doToken) {
-		lines.push(`| DigitalOcean token | \`${ctx.doToken}\` |`);
-	}
-
-	lines.push("");
-
-	writeFileSync(filePath, lines.join("\n"), "utf-8");
-	ui.success(`Settings saved to ${ui.cmd(filePath)}`);
 }
 
 async function checkPrerequisites(): Promise<void> {
@@ -528,6 +401,7 @@ async function checkPrerequisites(): Promise<void> {
 
 // Run
 main().catch((err) => {
+	saveOnExit();
 	if (err.name === "ExitPromptError") {
 		// User pressed Ctrl+C
 		console.log("\n");

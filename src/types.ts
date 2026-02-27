@@ -1,5 +1,5 @@
 /** Steps the user can select from the main menu. */
-export type StepId = "resend" | "hostinger" | "droplet" | "github-env" | "github-secrets" | "github-vars" | "deploy";
+export type StepId = "resend" | "neon" | "droplet" | "github-env" | "github-secrets" | "github-vars";
 
 export interface StepDef {
 	id: StepId;
@@ -34,11 +34,14 @@ export interface SetupContext {
 	/** Admin identity password. */
 	adminPassword: string;
 
-	/** Whether to include demo app OAuth2 clients. */
-	includeDemo: boolean;
+	/** Whether to include site OAuth2 clients. */
+	includeSite: boolean;
 
 	/** Droplet public IP. Set by step 3 or prompted. */
 	dropletIp: string;
+
+	/** Droplet name (e.g. "olympusoss-prod"). */
+	dropletName: string;
 
 	/** Path to generated SSH private key for deploy. */
 	sshPrivateKeyPath: string;
@@ -55,8 +58,19 @@ export interface SetupContext {
 	/** DNS records returned by Resend for email verification. */
 	resendDnsRecords: DnsRecord[];
 
-	/** Hostinger API token (empty = skip DNS automation). */
-	hostingerToken: string;
+	/** Neon API token for managed PostgreSQL. */
+	neonApiToken: string;
+
+	/** Neon project ID (set by neon step). */
+	neonProjectId: string;
+
+	/** Neon connection strings per database. */
+	neonDsns: {
+		ciamKratos: string;
+		ciamHydra: string;
+		iamKratos: string;
+		iamHydra: string;
+	};
 
 	/** GitHub PAT with read:packages scope for GHCR pulls. */
 	ghcrPat: string;
@@ -64,10 +78,13 @@ export interface SetupContext {
 	/** GitHub username for GHCR. */
 	ghcrUsername: string;
 
-	/** GitHub repo owner (e.g. "bnannier"). */
+	/** GitHub PAT for cross-repo dispatches (repo scope). */
+	orgDispatchToken: string;
+
+	/** GitHub repo owner (e.g. "OlympusOSS"). */
 	repoOwner: string;
 
-	/** GitHub repo name (e.g. "OlympusOSS"). */
+	/** GitHub repo name (e.g. "platform"). */
 	repoName: string;
 
 	/** DigitalOcean API token (only needed if creating new Droplet). */
@@ -78,6 +95,15 @@ export interface SetupContext {
 
 	/** Deploy path on the Droplet. */
 	deployPath: string;
+
+	/** Derived secrets (PBKDF2) — stored for reference, re-derived each run. */
+	derivedSecrets: Record<string, string>;
+
+	/** Full map of GitHub secrets set on the production environment. */
+	githubSecrets: Record<string, string>;
+
+	/** Full map of GitHub variables set on the production environment. */
+	githubVariables: Record<string, string>;
 }
 
 /** Create an empty context with sane defaults. */
@@ -88,20 +114,27 @@ export function createEmptyContext(): SetupContext {
 		passphrase: "",
 		adminEmail: "",
 		adminPassword: "",
-		includeDemo: false,
+		includeSite: false,
 		dropletIp: "",
+		dropletName: "",
 		sshPrivateKeyPath: "",
 		sshPublicKeyPath: "",
 		sshUser: "root",
 		resendApiKey: "",
 		resendDnsRecords: [],
-		hostingerToken: "",
+		neonApiToken: "",
+		neonProjectId: "",
+		neonDsns: { ciamKratos: "", ciamHydra: "", iamKratos: "", iamHydra: "" },
 		ghcrPat: "",
 		ghcrUsername: "",
+		orgDispatchToken: "",
 		repoOwner: "",
 		repoName: "",
 		doToken: "",
 		sshPort: 22,
 		deployPath: "/opt/olympusoss/prod",
+		derivedSecrets: {},
+		githubSecrets: {},
+		githubVariables: {},
 	};
 }

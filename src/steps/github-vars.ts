@@ -50,7 +50,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 		IAM_HYDRA_PUBLIC_URL: `https://oauth.iam.${domain}`,
 		CIAM_ATHENA_PUBLIC_URL: `https://admin.ciam.${domain}`,
 		IAM_ATHENA_PUBLIC_URL: `https://admin.iam.${domain}`,
-		DEMO_PUBLIC_URL: `https://olympus.${domain}`,
+		SITE_PUBLIC_URL: `https://olympus.${domain}`,
 
 		// Email
 		SMTP_FROM_EMAIL: `noreply@${domain}`,
@@ -65,14 +65,17 @@ export async function run(ctx: SetupContext): Promise<void> {
 		// Image tags
 		HERA_IMAGE_TAG: "latest",
 		ATHENA_IMAGE_TAG: "latest",
-		DEMO_IMAGE_TAG: "latest",
+		SITE_IMAGE_TAG: "latest",
 	};
 
-	// Add demo client IDs if included
-	if (ctx.includeDemo) {
-		variables.DEMO_CIAM_CLIENT_ID = "demo-ciam-client";
-		variables.DEMO_IAM_CLIENT_ID = "demo-iam-client";
+	// Add site client IDs if included
+	if (ctx.includeSite) {
+		variables.SITE_CIAM_CLIENT_ID = "site-ciam-client";
+		variables.SITE_IAM_CLIENT_ID = "site-iam-client";
 	}
+
+	// Save the full variables map to ctx so it persists in octl.json
+	ctx.githubVariables = variables;
 
 	// Set all variables
 	const names = Object.keys(variables);

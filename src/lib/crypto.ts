@@ -23,14 +23,11 @@ export function deriveSecret(passphrase: string, name: string, bytes: number): s
  * Derive all secrets needed for the OlympusOSS platform.
  *
  * @param passphrase      User-provided passphrase
- * @param includeDemo     Whether to generate demo app secrets
+ * @param includeSite     Whether to generate site OAuth2 secrets
  * @returns Map of secret name → hex value
  */
-export function deriveAllSecrets(passphrase: string, includeDemo: boolean): Record<string, string> {
+export function deriveAllSecrets(passphrase: string, includeSite: boolean): Record<string, string> {
 	const secrets: Record<string, string> = {
-		// PostgreSQL
-		POSTGRES_PASSWORD: deriveSecret(passphrase, "POSTGRES_PASSWORD", 32),
-
 		// CIAM Kratos
 		CIAM_KRATOS_SECRET_COOKIE: deriveSecret(passphrase, "CIAM_KRATOS_SECRET_COOKIE", 32),
 		CIAM_KRATOS_SECRET_CIPHER: deriveSecret(passphrase, "CIAM_KRATOS_SECRET_CIPHER", 16), // exactly 32 hex chars
@@ -52,9 +49,9 @@ export function deriveAllSecrets(passphrase: string, includeDemo: boolean): Reco
 		ATHENA_IAM_OAUTH_CLIENT_SECRET: deriveSecret(passphrase, "ATHENA_IAM_OAUTH_CLIENT_SECRET", 32),
 	};
 
-	if (includeDemo) {
-		secrets.DEMO_CIAM_CLIENT_SECRET = deriveSecret(passphrase, "DEMO_CIAM_CLIENT_SECRET", 32);
-		secrets.DEMO_IAM_CLIENT_SECRET = deriveSecret(passphrase, "DEMO_IAM_CLIENT_SECRET", 32);
+	if (includeSite) {
+		secrets.SITE_CIAM_CLIENT_SECRET = deriveSecret(passphrase, "SITE_CIAM_CLIENT_SECRET", 32);
+		secrets.SITE_IAM_CLIENT_SECRET = deriveSecret(passphrase, "SITE_IAM_CLIENT_SECRET", 32);
 	}
 
 	return secrets;

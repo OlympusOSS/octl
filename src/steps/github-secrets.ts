@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { input, password } from "@inquirer/prompts";
+import { input } from "@inquirer/prompts";
 import { deriveAllSecrets } from "../lib/crypto.js";
 import * as github from "../lib/github.js";
 import * as ui from "../lib/ui.js";
@@ -34,32 +34,8 @@ export async function run(ctx: SetupContext): Promise<void> {
 
 	// Derive all crypto secrets from passphrase
 	ui.info(`Deriving secrets from passphrase ${ui.dim("(PBKDF2, 600k iterations)")}...`);
-	const derived = deriveAllSecrets(ctx.passphrase, ctx.includeDemo);
+	const derived = deriveAllSecrets(ctx.passphrase, ctx.includeSite);
 	ui.success(`Derived ${ui.bold(String(Object.keys(derived).length))} secrets`);
-
-	// Collect externally-provided secrets
-	if (!ctx.resendApiKey) {
-		ui.info(`Create an API key at: ${ui.url("https://resend.com/api-keys")}`);
-		ctx.resendApiKey = await input({
-			message: `${ui.cyan("Resend API key")} ${ui.dim("(starts with re_)")}:`,
-			validate: (v) => (v.startsWith("re_") ? true : "API key must start with re_"),
-		});
-	}
-
-	if (!ctx.ghcrPat) {
-		ui.info(`Create a PAT at: ${ui.url("https://github.com/settings/tokens")} — scope: ${ui.bold("read:packages")}`);
-		ctx.ghcrPat = await password({
-			message: `${ui.cyan("GitHub PAT")} ${ui.dim("(read:packages)")}:`,
-			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
-		});
-	}
-
-	if (!ctx.adminPassword) {
-		ctx.adminPassword = await password({
-			message: `${ui.cyan("Admin password")} ${ui.dim("(for initial admin identity)")}:`,
-			validate: (v) => (v.length >= 8 ? true : "Password must be at least 8 characters"),
-		});
-	}
 
 	// Read SSH private key if available
 	let sshKey = "";
@@ -87,6 +63,12 @@ export async function run(ctx: SetupContext): Promise<void> {
 		DEPLOY_SERVER_IP: ctx.dropletIp,
 		GHCR_PAT: ctx.ghcrPat,
 
+		// Neon database connection strings
+		NEON_CIAM_KRATOS_DSN: ctx.neonDsns.ciamKratos,
+		NEON_CIAM_HYDRA_DSN: ctx.neonDsns.ciamHydra,
+		NEON_IAM_KRATOS_DSN: ctx.neonDsns.iamKratos,
+		NEON_IAM_HYDRA_DSN: ctx.neonDsns.iamHydra,
+
 		// Derived secrets
 		...derived,
 
@@ -96,6 +78,9 @@ export async function run(ctx: SetupContext): Promise<void> {
 		// Admin
 		ADMIN_PASSWORD: ctx.adminPassword,
 	};
+
+	// Save the full secrets map to ctx so it persists in octl.json
+	ctx.githubSecrets = secrets;
 
 	// Set all secrets
 	const names = Object.keys(secrets);
