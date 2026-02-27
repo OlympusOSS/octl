@@ -72,10 +72,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 			role = ownerRole.name;
 
 			// Get password via reveal endpoint
-			const pwRes = await fetch(
-				`${NEON_API}/projects/${projectId}/branches/${branchId}/roles/${role}/reveal_password`,
-				{ method: "GET", headers },
-			);
+			const pwRes = await fetch(`${NEON_API}/projects/${projectId}/branches/${branchId}/roles/${role}/reveal_password`, { method: "GET", headers });
 			if (pwRes.ok) {
 				const pwData = await pwRes.json();
 				password = pwData.password ?? "";
@@ -126,9 +123,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 	}
 
 	if (!branchId || !host || !role || !password) {
-		throw new Error(
-			`Missing Neon connection info: branch=${branchId}, host=${host}, role=${role}, password=${password ? "***" : "empty"}`,
-		);
+		throw new Error(`Missing Neon connection info: branch=${branchId}, host=${host}, role=${role}, password=${password ? "***" : "empty"}`);
 	}
 
 	// Create databases (idempotent — skip if already exists)
@@ -145,16 +140,13 @@ export async function run(ctx: SetupContext): Promise<void> {
 		if (existingDbs.has(dbName)) {
 			ui.skip(`Database ${ui.label(dbName)} already exists`);
 		} else {
-			const dbRes = await fetch(
-				`${NEON_API}/projects/${projectId}/branches/${branchId}/databases`,
-				{
-					method: "POST",
-					headers,
-					body: JSON.stringify({
-						database: { name: dbName, owner_name: role },
-					}),
-				},
-			);
+			const dbRes = await fetch(`${NEON_API}/projects/${projectId}/branches/${branchId}/databases`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					database: { name: dbName, owner_name: role },
+				}),
+			});
 
 			if (!dbRes.ok) {
 				const err = await dbRes.text();

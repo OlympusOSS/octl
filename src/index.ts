@@ -311,12 +311,7 @@ async function main(): Promise<void> {
 		ui.info(ui.bold("A Records") + ui.dim(` → all point to ${ctx.dropletIp}`));
 		ui.table(
 			["Type", "Name", "Value", "TTL"],
-			["login.ciam", "login.iam", "oauth.ciam", "oauth.iam", "admin.ciam", "admin.iam", "olympus"].map((sub) => [
-				"A",
-				sub,
-				ctx.dropletIp,
-				"3600",
-			]),
+			["login.ciam", "login.iam", "oauth.ciam", "oauth.iam", "admin.ciam", "admin.iam", "olympus"].map((sub) => ["A", sub, ctx.dropletIp, "3600"]),
 		);
 		console.log("");
 	}
