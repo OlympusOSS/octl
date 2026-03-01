@@ -3,29 +3,20 @@ import * as github from "../lib/github.js";
 import * as ui from "../lib/ui.js";
 import type { SetupContext } from "../types.js";
 
-const ENV = "production";
-
 /**
- * Step 6 — GitHub Variables: compute all URLs from domain and set them.
- *
- * - Derives all domain URLs from ctx.domain
- * - Sets all variables via gh variable set --env production
+ * Step 6 — GitHub Variables: compute all URLs from domain and set them
+ * at the organization level (visible to all repos in the org).
  */
 export async function run(ctx: SetupContext): Promise<void> {
-	// Ensure we have repo info
-	if (!ctx.repoOwner || !ctx.repoName) {
+	if (!ctx.repoOwner) {
 		const detected = await github.detectRepo();
 		if (detected) {
 			ctx.repoOwner = detected.owner;
-			ctx.repoName = detected.name;
 		} else {
-			const slug = await input({
-				message: `${ui.cyan("GitHub repo")} ${ui.dim("(owner/name)")}:`,
-				validate: (v) => (v.includes("/") ? true : "Format: owner/name"),
+			ctx.repoOwner = await input({
+				message: `${ui.cyan("GitHub org")} ${ui.dim("(e.g. OlympusOSS)")}:`,
+				validate: (v) => (v.length > 0 ? true : "Cannot be empty"),
 			});
-			const [owner, name] = slug.split("/");
-			ctx.repoOwner = owner;
-			ctx.repoName = name;
 		}
 	}
 
@@ -37,16 +28,12 @@ export async function run(ctx: SetupContext): Promise<void> {
 
 	const domain = ctx.domain;
 
-	// Build variables map
 	const variables: Record<string, string> = {
-		// Infrastructure
 		DEPLOY_SERVER_IP: ctx.dropletIp,
 		DEPLOY_USER: ctx.sshUser || "root",
 		DEPLOY_PATH: ctx.deployPath,
 		DEPLOY_SSH_PORT: String(ctx.sshPort),
 		GHCR_USERNAME: ctx.ghcrUsername,
-
-		// Domain URLs
 		CIAM_HERA_PUBLIC_URL: `https://login.ciam.${domain}`,
 		IAM_HERA_PUBLIC_URL: `https://login.iam.${domain}`,
 		CIAM_HYDRA_PUBLIC_URL: `https://oauth.ciam.${domain}`,
@@ -55,41 +42,30 @@ export async function run(ctx: SetupContext): Promise<void> {
 		IAM_ATHENA_PUBLIC_URL: `https://admin.iam.${domain}`,
 		SITE_PUBLIC_URL: `https://olympus.${domain}`,
 		PGADMIN_PUBLIC_URL: `https://pgadmin.${domain}`,
-
-		// Email
 		SMTP_FROM_EMAIL: `noreply@${domain}`,
-
-		// OAuth2 client IDs
 		ATHENA_CIAM_OAUTH_CLIENT_ID: "athena-ciam-client",
 		ATHENA_IAM_OAUTH_CLIENT_ID: "athena-iam-client",
 		PGADMIN_OAUTH_CLIENT_ID: "pgadmin",
-
-		// Admin
 		ADMIN_EMAIL: ctx.adminEmail || `admin@${domain}`,
-
-		// Image tags
 		HERA_IMAGE_TAG: "latest",
 		ATHENA_IMAGE_TAG: "latest",
 		SITE_IMAGE_TAG: "latest",
 	};
 
-	// Add site client IDs if included
 	if (ctx.includeSite) {
 		variables.SITE_CIAM_CLIENT_ID = "site-ciam-client";
 		variables.SITE_IAM_CLIENT_ID = "site-iam-client";
 	}
 
-	// Save the full variables map to ctx so it persists in octl.json
 	ctx.githubVariables = variables;
 
-	// Set all variables
 	const names = Object.keys(variables);
-	ui.info(`Setting ${ui.bold(String(names.length))} variables on ${ui.label(ENV)} environment...`);
+	ui.info(`Setting ${ui.bold(String(names.length))} variables on org ${ui.label(ctx.repoOwner)}...`);
 
 	for (const [name, value] of Object.entries(variables)) {
-		await github.setVariable(`${ctx.repoOwner}/${ctx.repoName}`, ENV, name, value);
+		await github.setOrgVariable(ctx.repoOwner, name, value);
 		ui.success(`${ui.label(name)} ${ui.dim("=")} ${ui.green(value)}`);
 	}
 
-	ui.info(`${ui.bold(String(names.length))} variables configured`);
+	ui.info(`${ui.bold(String(names.length))} variables configured on org ${ui.label(ctx.repoOwner)}`);
 }

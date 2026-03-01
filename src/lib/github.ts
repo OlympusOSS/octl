@@ -61,6 +61,20 @@ export async function setVariable(repo: string, environment: string, name: strin
 }
 
 /**
+ * Set an organization-level secret (visible to all repos). Overwrites if already set.
+ */
+export async function setOrgSecret(org: string, name: string, value: string): Promise<void> {
+	await execOrThrow("gh", ["secret", "set", name, "--org", org, "--visibility", "all", "--body", value]);
+}
+
+/**
+ * Set an organization-level variable (visible to all repos). Overwrites if already set.
+ */
+export async function setOrgVariable(org: string, name: string, value: string): Promise<void> {
+	await execOrThrow("gh", ["variable", "set", name, "--org", org, "--visibility", "all", "--body", value]);
+}
+
+/**
  * Trigger a workflow dispatch event.
  */
 export async function triggerWorkflow(repo: string, workflow: string, inputs?: Record<string, string>): Promise<void> {

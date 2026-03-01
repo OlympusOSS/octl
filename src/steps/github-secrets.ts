@@ -5,30 +5,20 @@ import * as github from "../lib/github.js";
 import * as ui from "../lib/ui.js";
 import type { SetupContext } from "../types.js";
 
-const ENV = "production";
-
 /**
- * Step 5 — GitHub Secrets: derive all secrets from passphrase and set them.
- *
- * - Derives deterministic secrets via PBKDF2
- * - Prompts for external keys not derivable (Resend, GHCR PAT, SSH key)
- * - Sets all secrets via gh secret set --env production
+ * Step 5 — GitHub Secrets: derive all secrets from passphrase and set them
+ * at the organization level (visible to all repos in the org).
  */
 export async function run(ctx: SetupContext): Promise<void> {
-	// Ensure we have repo info
-	if (!ctx.repoOwner || !ctx.repoName) {
+	if (!ctx.repoOwner) {
 		const detected = await github.detectRepo();
 		if (detected) {
 			ctx.repoOwner = detected.owner;
-			ctx.repoName = detected.name;
 		} else {
-			const slug = await input({
-				message: `${ui.cyan("GitHub repo")} ${ui.dim("(owner/name)")}:`,
-				validate: (v) => (v.includes("/") ? true : "Format: owner/name"),
+			ctx.repoOwner = await input({
+				message: `${ui.cyan("GitHub org")} ${ui.dim("(e.g. OlympusOSS)")}:`,
+				validate: (v) => (v.length > 0 ? true : "Cannot be empty"),
 			});
-			const [owner, name] = slug.split("/");
-			ctx.repoOwner = owner;
-			ctx.repoName = name;
 		}
 	}
 
@@ -37,7 +27,6 @@ export async function run(ctx: SetupContext): Promise<void> {
 	const derived = deriveAllSecrets(ctx.passphrase, ctx.includeSite);
 	ui.success(`Derived ${ui.bold(String(Object.keys(derived).length))} secrets`);
 
-	// Print derived secrets
 	for (const [name, value] of Object.entries(derived)) {
 		ui.success(`${ui.label(name)} ${ui.dim("=")} ${ui.magenta(value)}`);
 	}
@@ -62,7 +51,6 @@ export async function run(ctx: SetupContext): Promise<void> {
 			sshKeySource = keyInput;
 			ui.info(`Reading SSH private key from ${ui.cmd(keyInput)}`);
 		} catch {
-			// Assume it's the key content itself
 			sshKey = keyInput;
 			sshKeySource = "pasted content";
 		}
@@ -71,41 +59,30 @@ export async function run(ctx: SetupContext): Promise<void> {
 
 	// Build the complete secrets map
 	const secrets: Record<string, string> = {
-		// Infrastructure
 		DEPLOY_SSH_KEY: sshKey,
 		GHCR_PAT: ctx.ghcrPat,
-
-		// Neon database connection strings
 		NEON_CIAM_KRATOS_DSN: ctx.neonDsns.ciamKratos,
 		NEON_CIAM_HYDRA_DSN: ctx.neonDsns.ciamHydra,
 		NEON_IAM_KRATOS_DSN: ctx.neonDsns.iamKratos,
 		NEON_IAM_HYDRA_DSN: ctx.neonDsns.iamHydra,
-
-		// Derived secrets
 		...derived,
-
-		// SMTP
 		RESEND_API_KEY: ctx.resendApiKey,
-
-		// Admin
 		ADMIN_PASSWORD: ctx.adminPassword,
 	};
 
-	// Save the full secrets map to ctx so it persists in octl.json
 	ctx.githubSecrets = secrets;
 
-	// Set all secrets
 	const names = Object.keys(secrets);
-	ui.info(`Setting ${ui.bold(String(names.length))} secrets on ${ui.label(ENV)} environment...`);
+	ui.info(`Setting ${ui.bold(String(names.length))} secrets on org ${ui.label(ctx.repoOwner)}...`);
 
 	for (const [name, value] of Object.entries(secrets)) {
 		if (!value) {
 			ui.warn(`Skipping ${ui.label(name)} — empty value`);
 			continue;
 		}
-		await github.setSecret(`${ctx.repoOwner}/${ctx.repoName}`, ENV, name, value);
+		await github.setOrgSecret(ctx.repoOwner, name, value);
 		ui.success(`${ui.label(name)} ${ui.dim("=")} ${ui.magenta(value)}`);
 	}
 
-	ui.info(`${ui.bold(String(names.length))} secrets configured`);
+	ui.info(`${ui.bold(String(names.length))} secrets configured on org ${ui.label(ctx.repoOwner)}`);
 }

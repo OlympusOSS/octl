@@ -8,9 +8,7 @@ import { checkbox, confirm, input, password } from "@inquirer/prompts";
 import { deriveAllSecrets } from "./lib/crypto.js";
 import { commandExists, installHint } from "./lib/shell.js";
 import * as ui from "./lib/ui.js";
-import * as appDeploySecretsStep from "./steps/app-deploy-secrets.js";
 import * as dropletStep from "./steps/droplet.js";
-import * as githubEnvStep from "./steps/github-env.js";
 import * as githubSecretsStep from "./steps/github-secrets.js";
 import * as githubVarsStep from "./steps/github-vars.js";
 import * as neonStep from "./steps/neon.js";
@@ -50,32 +48,18 @@ const STEPS: Step[] = [
 		needs: [],
 	},
 	{
-		id: "github-env",
-		label: "GitHub Environment",
-		description: "Create production environment",
-		run: githubEnvStep.run,
-		needs: [],
-	},
-	{
 		id: "github-secrets",
 		label: "GitHub Secrets",
-		description: "Derive + set all secrets",
+		description: "Derive + set all org secrets",
 		run: githubSecretsStep.run,
 		needs: ["domain", "adminPassword"],
 	},
 	{
 		id: "github-vars",
 		label: "GitHub Variables",
-		description: "Compute + set all variables",
+		description: "Compute + set all org variables",
 		run: githubVarsStep.run,
 		needs: ["domain"],
-	},
-	{
-		id: "app-deploy-secrets",
-		label: "App Deploy Secrets",
-		description: "Set SSH + GHCR credentials on app repos (athena, hera, site)",
-		run: appDeploySecretsStep.run,
-		needs: [],
 	},
 ];
 
@@ -194,17 +178,13 @@ async function main(): Promise<void> {
 
 	// ── Collect GitHub repo if any GitHub steps are selected ─────────────
 
-	const needsRepo = selectedIds.some((id) => id.startsWith("github-") || id === "app-deploy-secrets");
-	if (needsRepo) {
-		const defaultRepo = ctx.repoOwner && ctx.repoName ? `${ctx.repoOwner}/${ctx.repoName}` : undefined;
-		const slug = await input({
-			message: `${ui.cyan("GitHub repo")} ${ui.dim("(owner/name)")}:`,
-			default: defaultRepo,
-			validate: (v) => (v.includes("/") ? true : "Format: owner/name"),
+	const needsGithub = selectedIds.some((id) => id.startsWith("github-"));
+	if (needsGithub) {
+		ctx.repoOwner = await input({
+			message: `${ui.cyan("GitHub org")} ${ui.dim("(e.g. OlympusOSS)")}:`,
+			default: ctx.repoOwner || undefined,
+			validate: (v) => (v.length > 0 ? true : "Cannot be empty"),
 		});
-		const [owner, name] = slug.split("/");
-		ctx.repoOwner = owner;
-		ctx.repoName = name;
 		saveSettings(ctx, true);
 	}
 
@@ -213,7 +193,7 @@ async function main(): Promise<void> {
 	const needsResendKey = selectedIds.includes("resend") || selectedIds.includes("github-secrets");
 	const needsNeonToken = selectedIds.includes("neon") || selectedIds.includes("github-secrets");
 	const needsDoToken = selectedIds.includes("droplet");
-	const needsGhcrPat = selectedIds.includes("github-secrets") || selectedIds.includes("app-deploy-secrets");
+	const needsGhcrPat = selectedIds.includes("github-secrets");
 
 	if (needsResendKey) {
 		ui.info(`Create an API key at: ${ui.url("https://resend.com/api-keys")}`);
@@ -313,7 +293,7 @@ async function main(): Promise<void> {
 	if (ctx.domain) ui.keyValue("Domain", ctx.domain);
 	if (ctx.dropletIp) ui.keyValue("Droplet IP", ctx.dropletIp);
 	if (ctx.neonProjectId) ui.keyValue("Neon Project", ctx.neonProjectId);
-	if (ctx.repoOwner) ui.keyValue("Repo", `${ctx.repoOwner}/${ctx.repoName}`);
+	if (ctx.repoOwner) ui.keyValue("GitHub Org", ctx.repoOwner);
 	if (ctx.adminEmail) ui.keyValue("Admin email", ctx.adminEmail);
 	console.log("");
 
