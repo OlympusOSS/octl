@@ -91,28 +91,13 @@ export async function run(ctx: SetupContext): Promise<void> {
 	const names = Object.keys(secrets);
 	ui.info(`Setting ${ui.bold(String(names.length))} secrets on ${ui.label(ENV)} environment...`);
 
-	// Keys that contain sensitive multi-line or credential data — show truncated
-	const masked = new Set(["DEPLOY_SSH_KEY", "GHCR_PAT", "RESEND_API_KEY", "ADMIN_PASSWORD"]);
-	const dsnKeys = new Set(["NEON_CIAM_KRATOS_DSN", "NEON_CIAM_HYDRA_DSN", "NEON_IAM_KRATOS_DSN", "NEON_IAM_HYDRA_DSN"]);
-
 	for (const [name, value] of Object.entries(secrets)) {
 		if (!value) {
 			ui.warn(`Skipping ${ui.label(name)} — empty value`);
 			continue;
 		}
 		await github.setSecret(ENV, name, value);
-
-		let display: string;
-		if (masked.has(name)) {
-			display = ui.dim(`${value.slice(0, 8)}...`);
-		} else if (dsnKeys.has(name)) {
-			// Show host portion only, mask credentials
-			const match = value.match(/@([^/]+)\//);
-			display = ui.dim(match ? `***@${match[1]}/***` : "***");
-		} else {
-			display = ui.magenta(value);
-		}
-		ui.success(`${ui.label(name)} ${ui.dim("=")} ${display}`);
+		ui.success(`${ui.label(name)} ${ui.dim("=")} ${ui.magenta(value)}`);
 	}
 
 	ui.info(`${ui.bold(String(names.length))} secrets configured`);
