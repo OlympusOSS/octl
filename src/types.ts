@@ -1,5 +1,5 @@
 /** Steps the user can select from the main menu. */
-export type StepId = "resend" | "neon" | "droplet" | "github-env" | "github-secrets" | "github-vars";
+export type StepId = "resend" | "neon" | "droplet" | "github-env" | "github-secrets" | "github-vars" | "app-deploy-secrets";
 
 export interface StepDef {
 	id: StepId;

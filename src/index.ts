@@ -8,6 +8,7 @@ import { checkbox, confirm, input, password } from "@inquirer/prompts";
 import { deriveAllSecrets } from "./lib/crypto.js";
 import { commandExists, installHint } from "./lib/shell.js";
 import * as ui from "./lib/ui.js";
+import * as appDeploySecretsStep from "./steps/app-deploy-secrets.js";
 import * as dropletStep from "./steps/droplet.js";
 import * as githubEnvStep from "./steps/github-env.js";
 import * as githubSecretsStep from "./steps/github-secrets.js";
@@ -68,6 +69,13 @@ const STEPS: Step[] = [
 		description: "Compute + set all variables",
 		run: githubVarsStep.run,
 		needs: ["domain"],
+	},
+	{
+		id: "app-deploy-secrets",
+		label: "App Deploy Secrets",
+		description: "Set SSH + GHCR credentials on app repos (athena, hera, site)",
+		run: appDeploySecretsStep.run,
+		needs: [],
 	},
 ];
 
@@ -186,7 +194,7 @@ async function main(): Promise<void> {
 
 	// ── Collect GitHub repo if any GitHub steps are selected ─────────────
 
-	const needsRepo = selectedIds.some((id) => id.startsWith("github-"));
+	const needsRepo = selectedIds.some((id) => id.startsWith("github-") || id === "app-deploy-secrets");
 	if (needsRepo) {
 		const defaultRepo = ctx.repoOwner && ctx.repoName ? `${ctx.repoOwner}/${ctx.repoName}` : undefined;
 		const slug = await input({
@@ -205,7 +213,7 @@ async function main(): Promise<void> {
 	const needsResendKey = selectedIds.includes("resend") || selectedIds.includes("github-secrets");
 	const needsNeonToken = selectedIds.includes("neon") || selectedIds.includes("github-secrets");
 	const needsDoToken = selectedIds.includes("droplet");
-	const needsGhcrPat = selectedIds.includes("github-secrets");
+	const needsGhcrPat = selectedIds.includes("github-secrets") || selectedIds.includes("app-deploy-secrets");
 
 	if (needsResendKey) {
 		ui.info(`Create an API key at: ${ui.url("https://resend.com/api-keys")}`);
