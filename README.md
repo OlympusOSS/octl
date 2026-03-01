@@ -32,6 +32,24 @@ Optional (the CLI tells you if needed):
 
 ---
 
+## Workspace
+
+octl is part of the [OlympusOSS Identity Platform](https://github.com/OlympusOSS/platform). All repos should be cloned as siblings under a shared workspace:
+
+```
+Olympus/
+├── platform/    # Infrastructure & Docker Compose
+├── athena/      # Admin dashboard
+├── hera/        # Auth & consent UI
+├── site/        # Brochure site & OAuth2 playground
+├── canvas/      # Design system
+└── octl/        # Deployment CLI (this repo)
+```
+
+octl is a **standalone deployment tool** — it is not part of the Docker Compose development environment. It's used to provision infrastructure and deploy the platform to production.
+
+---
+
 ## Usage
 
 ```bash

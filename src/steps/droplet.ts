@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { confirm, input, select } from "@inquirer/prompts";
-import { addSshKey, assignReservedIp, createReservedIp, ensureFirewall, listDroplets, listRegions, listReservedIps, listSizes, lookupDropletIp } from "../lib/digitalocean.js";
+import { addSshKey, assignReservedIp, createReservedIp, ensureFirewall, listDroplets, listRegions, listReservedIps, listSizes } from "../lib/digitalocean.js";
 import { commandExists, exec, execOrThrow, installHint } from "../lib/shell.js";
 import * as ui from "../lib/ui.js";
 import type { SetupContext } from "../types.js";
@@ -11,7 +11,7 @@ const SSH_KEY_NAME = "olympusoss-deploy";
 const CLOUD_INIT = `#cloud-config
 packages:
   - docker.io
-  - docker-compose-plugin
+  - docker-compose-v2
 runcmd:
   - systemctl enable --now docker
   - usermod -aG docker root
@@ -117,19 +117,6 @@ export async function run(ctx: SetupContext): Promise<void> {
 
 	// Verify the deploy key can actually authenticate to the droplet
 	await verifyDeployKey(ctx);
-}
-
-async function lookupExistingDroplet(ctx: SetupContext): Promise<void> {
-	const name = await input({
-		message: `${ui.cyan("Droplet name")}:`,
-		default: "olympusoss-prod",
-	});
-
-	ui.info(`Looking up Droplet ${ui.bold(name)}...`);
-	const ip = await lookupDropletIp(ctx.doToken, name);
-	ctx.dropletName = name;
-	ctx.dropletIp = ip;
-	ui.success(`Found Droplet ${ui.bold(name)} at ${ui.host(ip)}`);
 }
 
 async function createDroplet(ctx: SetupContext): Promise<number> {

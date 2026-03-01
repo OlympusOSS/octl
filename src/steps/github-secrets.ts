@@ -73,8 +73,6 @@ export async function run(ctx: SetupContext): Promise<void> {
 	const secrets: Record<string, string> = {
 		// Infrastructure
 		DEPLOY_SSH_KEY: sshKey,
-		DEPLOY_USER: ctx.sshUser || "root",
-		DEPLOY_SERVER_IP: ctx.dropletIp,
 		GHCR_PAT: ctx.ghcrPat,
 
 		// Neon database connection strings
@@ -105,7 +103,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 			ui.warn(`Skipping ${ui.label(name)} — empty value`);
 			continue;
 		}
-		await github.setSecret(ENV, name, value);
+		await github.setSecret(`${ctx.repoOwner}/${ctx.repoName}`, ENV, name, value);
 		ui.success(`${ui.label(name)} ${ui.dim("=")} ${ui.magenta(value)}`);
 	}
 

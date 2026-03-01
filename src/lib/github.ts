@@ -41,30 +41,30 @@ export async function createEnvironment(owner: string, repo: string, environment
 /**
  * Set an environment secret. Overwrites if already set.
  */
-export async function setSecret(environment: string, name: string, value: string): Promise<void> {
-	await execOrThrow("gh", ["secret", "set", name, "--env", environment, "--body", value]);
+export async function setSecret(repo: string, environment: string, name: string, value: string): Promise<void> {
+	await execOrThrow("gh", ["secret", "set", name, "--env", environment, "--body", value, "-R", repo]);
 }
 
 /**
  * Set a repository-level secret (not scoped to an environment). Overwrites if already set.
  */
-export async function setRepoSecret(name: string, value: string): Promise<void> {
-	await execOrThrow("gh", ["secret", "set", name, "--body", value]);
+export async function setRepoSecret(repo: string, name: string, value: string): Promise<void> {
+	await execOrThrow("gh", ["secret", "set", name, "--body", value, "-R", repo]);
 }
 
 /**
  * Set an environment variable. Overwrites if already set.
  */
-export async function setVariable(environment: string, name: string, value: string): Promise<void> {
+export async function setVariable(repo: string, environment: string, name: string, value: string): Promise<void> {
 	// gh variable set overwrites if the variable already exists
-	await execOrThrow("gh", ["variable", "set", name, "--env", environment, "--body", value]);
+	await execOrThrow("gh", ["variable", "set", name, "--env", environment, "--body", value, "-R", repo]);
 }
 
 /**
  * Trigger a workflow dispatch event.
  */
-export async function triggerWorkflow(workflow: string, inputs?: Record<string, string>): Promise<void> {
-	const args = ["workflow", "run", workflow];
+export async function triggerWorkflow(repo: string, workflow: string, inputs?: Record<string, string>): Promise<void> {
+	const args = ["workflow", "run", workflow, "-R", repo];
 	if (inputs) {
 		for (const [key, value] of Object.entries(inputs)) {
 			args.push("-f", `${key}=${value}`);

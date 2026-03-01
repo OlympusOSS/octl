@@ -40,6 +40,8 @@ export async function run(ctx: SetupContext): Promise<void> {
 	// Build variables map
 	const variables: Record<string, string> = {
 		// Infrastructure
+		DEPLOY_SERVER_IP: ctx.dropletIp,
+		DEPLOY_USER: ctx.sshUser || "root",
 		DEPLOY_PATH: ctx.deployPath,
 		DEPLOY_SSH_PORT: String(ctx.sshPort),
 		GHCR_USERNAME: ctx.ghcrUsername,
@@ -85,7 +87,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 	ui.info(`Setting ${ui.bold(String(names.length))} variables on ${ui.label(ENV)} environment...`);
 
 	for (const [name, value] of Object.entries(variables)) {
-		await github.setVariable(ENV, name, value);
+		await github.setVariable(`${ctx.repoOwner}/${ctx.repoName}`, ENV, name, value);
 		ui.success(`${ui.label(name)} ${ui.dim("=")} ${ui.green(value)}`);
 	}
 

@@ -53,22 +53,6 @@ export async function listDroplets(token: string): Promise<DropletInfo[]> {
 		.filter((d) => d.ip);
 }
 
-/**
- * Look up a Droplet's public IPv4 by name using the DigitalOcean REST API.
- * Throws if the Droplet is not found or has no public IP.
- */
-export async function lookupDropletIp(token: string, name: string): Promise<string> {
-	const droplets = await listDroplets(token);
-	const droplet = droplets.find((d) => d.name === name);
-
-	if (!droplet) {
-		const available = droplets.map((d) => d.name).join(", ");
-		throw new Error(`Droplet "${name}" not found. Available: ${available || "(none)"}`);
-	}
-
-	return droplet.ip;
-}
-
 export interface DropletSize {
 	slug: string;
 	vcpus: number;
@@ -257,14 +241,26 @@ export async function ensureFirewall(
 ): Promise<{ id: string; name: string }> {
 	const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
-	// Check for existing firewall
+	// Check for existing firewall by name
 	const listRes = await fetch(`${DO_API}/firewalls?per_page=200`, { headers });
 	if (listRes.ok) {
 		const listData = await listRes.json();
-		const existing = (listData.firewalls ?? []).find(
-			(fw: any) => fw.name === name && (fw.droplet_ids ?? []).includes(dropletId),
-		);
+		const existing = (listData.firewalls ?? []).find((fw: any) => fw.name === name);
 		if (existing) {
+			const currentIds: number[] = existing.droplet_ids ?? [];
+			if (!currentIds.includes(dropletId)) {
+				// Firewall exists but doesn't target this droplet — update it
+				await fetch(`${DO_API}/firewalls/${existing.id}`, {
+					method: "PUT",
+					headers,
+					body: JSON.stringify({
+						name: existing.name,
+						droplet_ids: [dropletId],
+						inbound_rules: existing.inbound_rules,
+						outbound_rules: existing.outbound_rules,
+					}),
+				});
+			}
 			return { id: existing.id, name: existing.name };
 		}
 	}

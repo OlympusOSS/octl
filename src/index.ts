@@ -39,7 +39,7 @@ const STEPS: Step[] = [
 		label: "Neon",
 		description: "Managed PostgreSQL — create project + databases",
 		run: neonStep.run,
-		needs: [],
+		needs: ["domain"],
 	},
 	{
 		id: "droplet",
@@ -60,14 +60,14 @@ const STEPS: Step[] = [
 		label: "GitHub Secrets",
 		description: "Derive + set all secrets",
 		run: githubSecretsStep.run,
-		needs: ["domain", "adminPassword", "includeSite"],
+		needs: ["domain", "adminPassword"],
 	},
 	{
 		id: "github-vars",
 		label: "GitHub Variables",
 		description: "Compute + set all variables",
 		run: githubVarsStep.run,
-		needs: ["domain", "includeSite"],
+		needs: ["domain"],
 	},
 ];
 
@@ -134,23 +134,32 @@ async function main(): Promise<void> {
 	}
 
 	// Always collect passphrase — it's the master key for the whole platform
-	while (true) {
-		ctx.passphrase = await password({
-			message: `${ui.cyan("Passphrase")} ${ui.dim("(used to derive all secrets — remember this!)")}:`,
+	if (ctx.passphrase) {
+		// Prefilled from previous run — let user confirm or change
+		ctx.passphrase = await input({
+			message: `${ui.cyan("Passphrase")} ${ui.dim("(used to derive all secrets)")}:`,
+			default: ctx.passphrase,
 			validate: (v) => (v.length >= 8 ? true : "Passphrase must be at least 8 characters"),
 		});
+	} else {
+		while (true) {
+			ctx.passphrase = await password({
+				message: `${ui.cyan("Passphrase")} ${ui.dim("(used to derive all secrets — remember this!)")}:`,
+				validate: (v) => (v.length >= 8 ? true : "Passphrase must be at least 8 characters"),
+			});
 
-		const confirmPass = await password({ message: `${ui.cyan("Confirm passphrase")}:` });
-		if (confirmPass === ctx.passphrase) break;
+			const confirmPass = await password({ message: `${ui.cyan("Confirm passphrase")}:` });
+			if (confirmPass === ctx.passphrase) break;
 
-		ui.error("Passphrases do not match.");
-		const retry = await confirm({
-			message: "Would you like to try again?",
-			default: true,
-		});
-		if (!retry) {
-			ui.info("Exiting.");
-			process.exit(0);
+			ui.error("Passphrases do not match.");
+			const retry = await confirm({
+				message: "Would you like to try again?",
+				default: true,
+			});
+			if (!retry) {
+				ui.info("Exiting.");
+				process.exit(0);
+			}
 		}
 	}
 
@@ -164,20 +173,16 @@ async function main(): Promise<void> {
 		});
 		saveSettings(ctx, true);
 
-		ctx.adminPassword = await password({
+		ctx.adminPassword = await input({
 			message: `${ui.cyan("Admin password")} ${ui.dim("(for initial IAM admin identity)")}:`,
+			default: ctx.adminPassword || undefined,
 			validate: (v) => (v.length >= 8 ? true : "Password must be at least 8 characters"),
 		});
 		saveSettings(ctx, true);
 	}
 
-	if (allNeeds.has("includeSite")) {
-		ctx.includeSite = await confirm({
-			message: `Include ${ui.bold("site")} OAuth2 clients?`,
-			default: false,
-		});
-		saveSettings(ctx, true);
-	}
+	// Site OAuth2 clients are always included
+	ctx.includeSite = true;
 
 	// ── Collect GitHub repo if any GitHub steps are selected ─────────────
 
@@ -234,8 +239,9 @@ async function main(): Promise<void> {
 
 	if (needsGhcrPat) {
 		ui.info(`Create a PAT at: ${ui.url("https://github.com/settings/tokens")} — scope: ${ui.bold("read:packages")}`);
-		ctx.ghcrPat = await password({
+		ctx.ghcrPat = await input({
 			message: `${ui.cyan("GitHub PAT")} ${ui.dim("(read:packages)")}:`,
+			default: ctx.ghcrPat || undefined,
 			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
 		});
 		saveSettings(ctx, true);

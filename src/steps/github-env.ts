@@ -16,22 +16,23 @@ export async function run(ctx: SetupContext): Promise<void> {
 	ctx.ghcrUsername = ctx.ghcrUsername || username;
 	ui.success(`Authenticated as ${ui.bold(username)}`);
 
-	// Detect repo
-	const detected = await github.detectRepo();
-	if (detected) {
-		ctx.repoOwner = detected.owner;
-		ctx.repoName = detected.name;
-		ui.success(`Detected repo: ${ui.bold(`${detected.owner}/${detected.name}`)}`);
-	} else {
-		ui.warn("Could not detect repo from git remote");
-		const slug = await input({
-			message: `${ui.cyan("GitHub repo")} ${ui.dim("(owner/name)")}:`,
-			validate: (v) => (v.includes("/") ? true : "Format: owner/name"),
-		});
-		const [owner, name] = slug.split("/");
-		ctx.repoOwner = owner;
-		ctx.repoName = name;
+	// Use repo from ctx (already confirmed in main prompt), fall back to detection
+	if (!ctx.repoOwner || !ctx.repoName) {
+		const detected = await github.detectRepo();
+		if (detected) {
+			ctx.repoOwner = detected.owner;
+			ctx.repoName = detected.name;
+		} else {
+			const slug = await input({
+				message: `${ui.cyan("GitHub repo")} ${ui.dim("(owner/name)")}:`,
+				validate: (v) => (v.includes("/") ? true : "Format: owner/name"),
+			});
+			const [owner, name] = slug.split("/");
+			ctx.repoOwner = owner;
+			ctx.repoName = name;
+		}
 	}
+	ui.success(`Using repo: ${ui.bold(`${ctx.repoOwner}/${ctx.repoName}`)}`)
 
 	// Create environment
 	const ok = await github.createEnvironment(ctx.repoOwner, ctx.repoName, "production");

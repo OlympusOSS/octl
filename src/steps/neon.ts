@@ -1,3 +1,4 @@
+import { select } from "@inquirer/prompts";
 import * as ui from "../lib/ui.js";
 import type { SetupContext } from "../types.js";
 
@@ -31,25 +32,87 @@ export async function run(ctx: SetupContext): Promise<void> {
 		"Content-Type": "application/json",
 	};
 
-	let projectId = ctx.neonProjectId;
+	// Always resolve org from API (saved value is just a hint, not trusted)
+	const orgId = await resolveOrgId(headers);
+	if (orgId) ctx.neonOrgId = orgId;
+
+	/** Build a Neon API URL, appending org_id if available. */
+	const neonUrl = (path: string) =>
+		orgId ? `${NEON_API}${path}?org_id=${orgId}` : `${NEON_API}${path}`;
+
+	let projectId = "";
 	let branchId = "";
 	let host = "";
 	let role = "";
 	let password = "";
 
+	const projectName = `olympus.${ctx.domain || "prod"}`;
+
+	// Always list projects from API and let user choose (saved ID used to pre-select)
+	ui.info("Checking for existing Neon projects...");
+	const listRes = await fetch(neonUrl("/projects"), { headers });
+	if (listRes.ok) {
+		const listData = await listRes.json();
+		const projects: Array<{ id: string; name: string }> = listData.projects ?? [];
+
+		if (projects.length > 0) {
+			// Pre-select the saved project if it still exists
+			const savedIdx = ctx.neonProjectId
+				? projects.findIndex((p) => p.id === ctx.neonProjectId)
+				: -1;
+
+			const choices = [
+				...projects.map((p) => ({
+					name: `${ui.bold(p.name)} ${ui.dim(p.id)}`,
+					value: p.id,
+				})),
+				{
+					name: `${ui.bold("Create new")} ${ui.dim(`(${projectName})`)}`,
+					value: "__new__",
+				},
+			];
+
+			const chosen = await select({
+				message: `${ui.cyan("Neon project")}:`,
+				choices,
+				default: savedIdx >= 0 ? projects[savedIdx].id : undefined,
+			});
+
+			if (chosen !== "__new__") {
+				projectId = chosen;
+				const proj = projects.find((p) => p.id === chosen);
+				ui.success(`Using project ${ui.label(proj?.name ?? chosen)}`);
+			}
+		}
+	}
+
 	if (projectId) {
 		// Reuse existing project — fetch its details
 		ui.skip(`Neon project ${ui.label(projectId)} already exists`);
 
-		const projRes = await fetch(`${NEON_API}/projects/${projectId}`, { headers });
+		const projRes = await fetch(neonUrl(`/projects/${projectId}`), { headers });
 		if (!projRes.ok) {
 			throw new Error(`Failed to fetch Neon project: ${await projRes.text()}`);
 		}
 		const projData = await projRes.json();
 		branchId = projData.project?.default_branch_id ?? "";
 
+		// Fallback: fetch branches if default_branch_id missing from project response
+		if (!branchId) {
+			const branchRes = await fetch(neonUrl(`/projects/${projectId}/branches`), { headers });
+			if (branchRes.ok) {
+				const branchData = await branchRes.json();
+				const primary = (branchData.branches ?? []).find((b: any) => b.primary) ?? branchData.branches?.[0];
+				if (primary) branchId = primary.id;
+			}
+		}
+
+		if (!branchId) {
+			throw new Error("Could not determine default branch for Neon project");
+		}
+
 		// Get the endpoint host
-		const endpointsRes = await fetch(`${NEON_API}/projects/${projectId}/endpoints`, { headers });
+		const endpointsRes = await fetch(neonUrl(`/projects/${projectId}/endpoints`), { headers });
 		if (!endpointsRes.ok) {
 			throw new Error(`Failed to fetch Neon endpoints: ${await endpointsRes.text()}`);
 		}
@@ -60,7 +123,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 		}
 
 		// Get the role
-		const rolesRes = await fetch(`${NEON_API}/projects/${projectId}/branches/${branchId}/roles`, {
+		const rolesRes = await fetch(neonUrl(`/projects/${projectId}/branches/${branchId}/roles`), {
 			headers,
 		});
 		if (!rolesRes.ok) {
@@ -72,7 +135,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 			role = ownerRole.name;
 
 			// Get password via reveal endpoint
-			const pwRes = await fetch(`${NEON_API}/projects/${projectId}/branches/${branchId}/roles/${role}/reveal_password`, { method: "GET", headers });
+			const pwRes = await fetch(neonUrl(`/projects/${projectId}/branches/${branchId}/roles/${role}/reveal_password`), { method: "GET", headers });
 			if (pwRes.ok) {
 				const pwData = await pwRes.json();
 				password = pwData.password ?? "";
@@ -82,12 +145,13 @@ export async function run(ctx: SetupContext): Promise<void> {
 		// Create a new project
 		ui.info("Creating Neon project...");
 
-		const createRes = await fetch(`${NEON_API}/projects`, {
+		const createRes = await fetch(neonUrl("/projects"), {
 			method: "POST",
 			headers,
 			body: JSON.stringify({
 				project: {
-					name: `olympus-${ctx.domain || "prod"}`,
+					name: projectName,
+					...(orgId ? { org_id: orgId } : {}),
 					pg_version: 17,
 				},
 			}),
@@ -120,6 +184,10 @@ export async function run(ctx: SetupContext): Promise<void> {
 
 		ctx.neonProjectId = projectId;
 		ui.success(`Created project ${ui.label(projectId)}`);
+
+		// Wait for project to finish initializing before creating databases
+		ui.info("Waiting for project to be ready...");
+		await waitForProject(headers, projectId, orgId);
 	}
 
 	if (!branchId || !host || !role || !password) {
@@ -130,7 +198,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 	ui.info("Creating databases...");
 
 	// First, list existing databases
-	const dbListRes = await fetch(`${NEON_API}/projects/${projectId}/branches/${branchId}/databases`, {
+	const dbListRes = await fetch(neonUrl(`/projects/${projectId}/branches/${branchId}/databases`), {
 		headers,
 	});
 	const dbListData = dbListRes.ok ? await dbListRes.json() : { databases: [] };
@@ -140,17 +208,27 @@ export async function run(ctx: SetupContext): Promise<void> {
 		if (existingDbs.has(dbName)) {
 			ui.skip(`Database ${ui.label(dbName)} already exists`);
 		} else {
-			const dbRes = await fetch(`${NEON_API}/projects/${projectId}/branches/${branchId}/databases`, {
-				method: "POST",
-				headers,
-				body: JSON.stringify({
-					database: { name: dbName, owner_name: role },
-				}),
-			});
+			// Retry with backoff — Neon may still have operations in progress
+			let dbRes: Response | null = null;
+			for (let attempt = 0; attempt < 5; attempt++) {
+				dbRes = await fetch(neonUrl(`/projects/${projectId}/branches/${branchId}/databases`), {
+					method: "POST",
+					headers,
+					body: JSON.stringify({
+						database: { name: dbName, owner_name: role },
+					}),
+				});
 
-			if (!dbRes.ok) {
-				const err = await dbRes.text();
-				throw new Error(`Failed to create database ${dbName}: ${err}`);
+				if (dbRes.ok) break;
+
+				const body = await dbRes.text();
+				if (body.includes("conflicting operations") && attempt < 4) {
+					ui.info("Waiting for previous operation to complete...");
+					await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+					continue;
+				}
+
+				throw new Error(`Failed to create database ${dbName}: ${body}`);
 			}
 
 			ui.success(`Created database ${ui.label(dbName)}`);
@@ -169,5 +247,68 @@ export async function run(ctx: SetupContext): Promise<void> {
 		// Show DSN with password masked
 		const masked = ctx.neonDsns[key].replace(/:([^@]+)@/, ":***@");
 		ui.success(`${ui.label(dbName)} ${ui.dim("→")} ${ui.dim(masked)}`);
+	}
+}
+
+/**
+ * Resolve the Neon organization ID via /users/me/organizations.
+ * Returns empty string for free/personal accounts with no org.
+ */
+async function resolveOrgId(headers: Record<string, string>): Promise<string> {
+	ui.info("Resolving Neon organization...");
+
+	const res = await fetch(`${NEON_API}/users/me/organizations`, { headers });
+	if (!res.ok) {
+		// Personal/free accounts may not support this endpoint — proceed without org
+		ui.skip("No organization found — using personal account");
+		return "";
+	}
+
+	const data = await res.json();
+	const orgs: Array<{ id: string; name: string }> = data.organizations ?? data ?? [];
+
+	if (orgs.length === 0) {
+		ui.skip("No organization found — using personal account");
+		return "";
+	}
+
+	if (orgs.length === 1) {
+		ui.success(`Using org ${ui.bold(orgs[0].name)} (${ui.label(orgs[0].id)})`);
+		return orgs[0].id;
+	}
+
+	// Multiple orgs — let the user pick
+	const orgId = await select({
+		message: `${ui.cyan("Neon organization")}:`,
+		choices: orgs.map((o) => ({
+			name: `${ui.bold(o.name)} ${ui.dim(o.id)}`,
+			value: o.id,
+		})),
+	});
+
+	return orgId;
+}
+
+/**
+ * Poll the project's operations until none are running.
+ * Neon rejects new operations while existing ones are in progress.
+ */
+async function waitForProject(headers: Record<string, string>, projectId: string, orgId: string): Promise<void> {
+	const opsUrl = orgId
+		? `${NEON_API}/projects/${projectId}/operations?org_id=${orgId}&limit=5`
+		: `${NEON_API}/projects/${projectId}/operations?limit=5`;
+	for (let i = 0; i < 20; i++) {
+		const res = await fetch(opsUrl, { headers });
+		if (!res.ok) break;
+
+		const data = await res.json();
+		const running = (data.operations ?? []).some((op: any) => op.status === "running" || op.status === "scheduling");
+
+		if (!running) {
+			ui.success("Project is ready");
+			return;
+		}
+
+		await new Promise((r) => setTimeout(r, 2000));
 	}
 }
