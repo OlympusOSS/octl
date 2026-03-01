@@ -37,11 +37,14 @@ export interface SetupContext {
 	/** Whether to include site OAuth2 clients. */
 	includeSite: boolean;
 
-	/** Droplet public IP. Set by step 3 or prompted. */
+	/** Droplet public IP. Set by step 3 or prompted. Prefers reserved IP when available. */
 	dropletIp: string;
 
 	/** Droplet name (e.g. "olympusoss-prod"). */
 	dropletName: string;
+
+	/** DigitalOcean reserved IP assigned to the droplet (static, survives droplet recreation). */
+	reservedIp: string;
 
 	/** Path to generated SSH private key for deploy. */
 	sshPrivateKeyPath: string;
@@ -60,6 +63,9 @@ export interface SetupContext {
 
 	/** Neon API token for managed PostgreSQL. */
 	neonApiToken: string;
+
+	/** Neon organization ID (resolved via /users/me). */
+	neonOrgId: string;
 
 	/** Neon project ID (set by neon step). */
 	neonProjectId: string;
@@ -117,12 +123,14 @@ export function createEmptyContext(): SetupContext {
 		includeSite: false,
 		dropletIp: "",
 		dropletName: "",
+		reservedIp: "",
 		sshPrivateKeyPath: "",
 		sshPublicKeyPath: "",
 		sshUser: "root",
 		resendApiKey: "",
 		resendDnsRecords: [],
 		neonApiToken: "",
+		neonOrgId: "",
 		neonProjectId: "",
 		neonDsns: { ciamKratos: "", ciamHydra: "", iamKratos: "", iamHydra: "" },
 		ghcrPat: "",

@@ -49,6 +49,9 @@ export function deriveAllSecrets(passphrase: string, includeSite: boolean): Reco
 		ATHENA_IAM_OAUTH_CLIENT_SECRET: deriveSecret(passphrase, "ATHENA_IAM_OAUTH_CLIENT_SECRET", 32),
 	};
 
+	// pgAdmin (always — admin tool)
+	secrets.PGADMIN_OAUTH_CLIENT_SECRET = deriveSecret(passphrase, "PGADMIN_OAUTH_CLIENT_SECRET", 32);
+
 	if (includeSite) {
 		secrets.SITE_CIAM_CLIENT_SECRET = deriveSecret(passphrase, "SITE_CIAM_CLIENT_SECRET", 32);
 		secrets.SITE_IAM_CLIENT_SECRET = deriveSecret(passphrase, "SITE_IAM_CLIENT_SECRET", 32);

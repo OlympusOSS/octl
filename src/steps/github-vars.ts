@@ -32,6 +32,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 	if (!ctx.ghcrUsername) {
 		const username = await github.ensureGhAuth();
 		ctx.ghcrUsername = username;
+		ui.success(`GHCR username: ${ui.bold(username)}`);
 	}
 
 	const domain = ctx.domain;
@@ -51,6 +52,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 		CIAM_ATHENA_PUBLIC_URL: `https://admin.ciam.${domain}`,
 		IAM_ATHENA_PUBLIC_URL: `https://admin.iam.${domain}`,
 		SITE_PUBLIC_URL: `https://olympus.${domain}`,
+		PGADMIN_PUBLIC_URL: `https://pgadmin.${domain}`,
 
 		// Email
 		SMTP_FROM_EMAIL: `noreply@${domain}`,
@@ -58,6 +60,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 		// OAuth2 client IDs
 		ATHENA_CIAM_OAUTH_CLIENT_ID: "athena-ciam-client",
 		ATHENA_IAM_OAUTH_CLIENT_ID: "athena-iam-client",
+		PGADMIN_OAUTH_CLIENT_ID: "pgadmin",
 
 		// Admin
 		ADMIN_EMAIL: ctx.adminEmail || `admin@${domain}`,
