@@ -19,6 +19,9 @@ export interface DnsRecord {
 
 /** Accumulated context passed through every step. */
 export interface SetupContext {
+	/** Whether this is a demo instance (uses hardcoded demo accounts). */
+	demo: boolean;
+
 	/** Which steps the user selected to run. */
 	selectedSteps: StepId[];
 
@@ -115,6 +118,7 @@ export interface SetupContext {
 /** Create an empty context with sane defaults. */
 export function createEmptyContext(): SetupContext {
 	return {
+		demo: false,
 		selectedSteps: [],
 		domain: "",
 		passphrase: "",

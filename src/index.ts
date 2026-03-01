@@ -111,6 +111,13 @@ async function main(): Promise<void> {
 	ctx.selectedSteps = selectedIds;
 	activeCtx = ctx;
 
+	// Demo mode — skips admin email/password prompts, uses hardcoded demo accounts
+	ctx.demo = await confirm({
+		message: `${ui.cyan("Demo mode?")} ${ui.dim("(hardcoded accounts: admin@athena.dev, viewer@athena.dev, demo@demo.user)")}`,
+		default: ctx.demo || false,
+	});
+	saveSettings(ctx, true);
+
 	const selectedSteps = STEPS.filter((s) => selectedIds.includes(s.id));
 
 	// Collect common inputs upfront (only what selected steps need)
@@ -158,19 +165,26 @@ async function main(): Promise<void> {
 	saveSettings(ctx, true);
 
 	if (allNeeds.has("adminPassword")) {
-		ctx.adminEmail = await input({
-			message: `${ui.cyan("Admin email")} ${ui.dim("(for initial IAM admin identity)")}:`,
-			default: ctx.adminEmail || (ctx.domain ? `admin@${ctx.domain}` : undefined),
-			validate: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? true : "Enter a valid email address"),
-		});
-		saveSettings(ctx, true);
+		if (ctx.demo) {
+			ctx.adminEmail = "admin@athena.dev";
+			ctx.adminPassword = "admin123!";
+			ui.info(`Demo mode: using ${ui.bold("admin@athena.dev")} / ${ui.bold("admin123!")}`);
+			saveSettings(ctx, true);
+		} else {
+			ctx.adminEmail = await input({
+				message: `${ui.cyan("Admin email")} ${ui.dim("(for initial IAM admin identity)")}:`,
+				default: ctx.adminEmail || (ctx.domain ? `admin@${ctx.domain}` : undefined),
+				validate: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? true : "Enter a valid email address"),
+			});
+			saveSettings(ctx, true);
 
-		ctx.adminPassword = await input({
-			message: `${ui.cyan("Admin password")} ${ui.dim("(for initial IAM admin identity)")}:`,
-			default: ctx.adminPassword || undefined,
-			validate: (v) => (v.length >= 8 ? true : "Password must be at least 8 characters"),
-		});
-		saveSettings(ctx, true);
+			ctx.adminPassword = await input({
+				message: `${ui.cyan("Admin password")} ${ui.dim("(for initial IAM admin identity)")}:`,
+				default: ctx.adminPassword || undefined,
+				validate: (v) => (v.length >= 8 ? true : "Password must be at least 8 characters"),
+			});
+			saveSettings(ctx, true);
+		}
 	}
 
 	// Site OAuth2 clients are always included
@@ -295,6 +309,7 @@ async function main(): Promise<void> {
 	if (ctx.neonProjectId) ui.keyValue("Neon Project", ctx.neonProjectId);
 	if (ctx.repoOwner) ui.keyValue("GitHub Org", ctx.repoOwner);
 	if (ctx.adminEmail) ui.keyValue("Admin email", ctx.adminEmail);
+	if (ctx.demo) ui.keyValue("Demo Mode", "enabled");
 	console.log("");
 
 	// Always print DNS setup instructions if we have domain + IP
