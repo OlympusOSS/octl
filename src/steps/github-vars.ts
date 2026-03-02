@@ -57,16 +57,6 @@ export async function run(ctx: SetupContext): Promise<void> {
 		variables.SITE_IAM_CLIENT_ID = "site-iam-client";
 	}
 
-	if (ctx.demo) {
-		variables.DEMO_ACCOUNTS_IAM = JSON.stringify([
-			{ email: ctx.adminEmail, name: "Admin", role: "Admin" },
-			{ email: `viewer@${domain}`, name: "Viewer", role: "Viewer" },
-		]);
-		variables.DEMO_ACCOUNTS_CIAM = JSON.stringify([
-			{ email: "demo@demo.user", name: "Demo User", role: "Customer" },
-		]);
-	}
-
 	ctx.githubVariables = variables;
 
 	const names = Object.keys(variables);
