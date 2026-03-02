@@ -314,6 +314,32 @@ async function handleReservedIp(ctx: SetupContext, dropletId: number): Promise<v
 	ctx.reservedIp = ip;
 	ctx.dropletIp = ip;
 	ui.success(`Reserved IP ${ui.host(ip)} assigned — use this for DNS and deploy`);
+
+	// Clear stale known_hosts entry (the IP may have pointed to a previous droplet)
+	await exec("ssh-keygen", ["-R", ip]);
+
+	// Wait for SSH to become reachable through the reserved IP
+	ui.info(`Waiting for SSH through reserved IP ${ui.host(ip)}...`);
+	const sshOpts = [
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=5",
+		"-o", "PasswordAuthentication=no",
+		"-o", "BatchMode=yes",
+	];
+	if (ctx.sshPrivateKeyPath) {
+		sshOpts.push("-i", ctx.sshPrivateKeyPath);
+	}
+	const target = `${ctx.sshUser || "root"}@${ip}`;
+	let connected = false;
+	while (!connected) {
+		const ssh = await exec("ssh", [...sshOpts, target, "echo ok"]);
+		if (ssh.exitCode === 0) {
+			ui.success(`SSH reachable through reserved IP ${ui.host(ip)}`);
+			connected = true;
+		} else {
+			await new Promise((r) => setTimeout(r, 10_000));
+		}
+	}
 }
 
 /**
