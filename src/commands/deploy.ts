@@ -1,0 +1,309 @@
+import { checkbox, confirm, input, password } from "@inquirer/prompts";
+import { deriveAllSecrets } from "../lib/crypto.js";
+import { saveSettings } from "../lib/settings.js";
+import { commandExists, installHint } from "../lib/shell.js";
+import * as ui from "../lib/ui.js";
+import * as dropletStep from "../steps/droplet.js";
+import * as githubSecretsStep from "../steps/github-secrets.js";
+import * as githubVarsStep from "../steps/github-vars.js";
+import * as neonStep from "../steps/neon.js";
+import * as resendStep from "../steps/resend.js";
+import type { SetupContext, StepId } from "../types.js";
+
+interface Step {
+	id: StepId;
+	label: string;
+	description: string;
+	run: (ctx: SetupContext) => Promise<void>;
+	/** Which common inputs this step requires. */
+	needs: ("domain" | "passphrase" | "adminPassword" | "includeSite")[];
+}
+
+const STEPS: Step[] = [
+	{
+		id: "resend",
+		label: "Resend",
+		description: "Email provider — add domain + get DNS records",
+		run: resendStep.run,
+		needs: ["domain"],
+	},
+	{
+		id: "neon",
+		label: "Neon",
+		description: "Managed PostgreSQL — create project + databases",
+		run: neonStep.run,
+		needs: ["domain"],
+	},
+	{
+		id: "droplet",
+		label: "DigitalOcean",
+		description: "Droplet — create or connect + SSH setup",
+		run: dropletStep.run,
+		needs: [],
+	},
+	{
+		id: "github-secrets",
+		label: "GitHub Secrets",
+		description: "Derive + set all org secrets",
+		run: githubSecretsStep.run,
+		needs: ["domain", "adminPassword"],
+	},
+	{
+		id: "github-vars",
+		label: "GitHub Variables",
+		description: "Compute + set all org variables",
+		run: githubVarsStep.run,
+		needs: ["domain"],
+	},
+];
+
+/**
+ * Prod deploy command — provision infrastructure and configure secrets.
+ * Extracted from the original index.ts main() function.
+ */
+export async function run(ctx: SetupContext): Promise<void> {
+	// Check prerequisites
+	await checkPrerequisites();
+
+	// Step selection
+	const selectedIds = await checkbox<StepId>({
+		message: "Which steps do you want to run?",
+		choices: STEPS.map((s, i) => ({
+			name: `${ui.cyan(`${i + 1}.`)} ${ui.bold(s.label)} ${ui.dim("—")} ${ui.dim(s.description)}`,
+			value: s.id,
+			checked: false,
+		})),
+		required: true,
+	});
+
+	ctx.selectedSteps = selectedIds;
+	saveSettings(ctx, true);
+
+	const selectedSteps = STEPS.filter((s) => selectedIds.includes(s.id));
+
+	// Collect common inputs upfront (only what selected steps need)
+	const allNeeds = new Set(selectedSteps.flatMap((s) => s.needs));
+
+	if (allNeeds.has("domain")) {
+		ctx.domain = await input({
+			message: `${ui.cyan("Domain name")} ${ui.dim("(e.g. example.com)")}:`,
+			default: ctx.domain || undefined,
+			validate: (v) => (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(v) ? true : "Enter a valid domain name"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	// Always collect passphrase — it's the master key for the whole platform
+	if (ctx.passphrase) {
+		// Prefilled from previous run — let user confirm or change
+		ctx.passphrase = await input({
+			message: `${ui.cyan("Passphrase")} ${ui.dim("(used to derive all secrets)")}:`,
+			default: ctx.passphrase,
+			validate: (v) => (v.length >= 8 ? true : "Passphrase must be at least 8 characters"),
+		});
+	} else {
+		while (true) {
+			ctx.passphrase = await password({
+				message: `${ui.cyan("Passphrase")} ${ui.dim("(used to derive all secrets — remember this!)")}:`,
+				validate: (v) => (v.length >= 8 ? true : "Passphrase must be at least 8 characters"),
+			});
+
+			const confirmPass = await password({ message: `${ui.cyan("Confirm passphrase")}:` });
+			if (confirmPass === ctx.passphrase) break;
+
+			ui.error("Passphrases do not match.");
+			const retry = await confirm({
+				message: "Would you like to try again?",
+				default: true,
+			});
+			if (!retry) {
+				ui.info("Exiting.");
+				process.exit(0);
+			}
+		}
+	}
+
+	saveSettings(ctx, true);
+
+	if (allNeeds.has("adminPassword")) {
+		ctx.adminEmail = await input({
+			message: `${ui.cyan("Admin email")} ${ui.dim("(for initial IAM admin identity)")}:`,
+			default: ctx.adminEmail || (ctx.domain ? `admin@${ctx.domain}` : undefined),
+			validate: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? true : "Enter a valid email address"),
+		});
+		saveSettings(ctx, true);
+
+		ctx.adminPassword = await input({
+			message: `${ui.cyan("Admin password")} ${ui.dim("(for initial IAM admin identity)")}:`,
+			default: ctx.adminPassword || undefined,
+			validate: (v) => (v.length >= 8 ? true : "Password must be at least 8 characters"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	// Site OAuth2 clients are always included
+	ctx.includeSite = true;
+
+	// ── Collect GitHub repo if any GitHub steps are selected ─────────────
+
+	const needsGithub = selectedIds.some((id) => id.startsWith("github-"));
+	if (needsGithub) {
+		ctx.repoOwner = await input({
+			message: `${ui.cyan("GitHub org")} ${ui.dim("(e.g. OlympusOSS)")}:`,
+			default: ctx.repoOwner || undefined,
+			validate: (v) => (v.length > 0 ? true : "Cannot be empty"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	// ── Collect tokens & API keys upfront based on selected steps ────────
+
+	const needsResendKey = selectedIds.includes("resend") || selectedIds.includes("github-secrets");
+	const needsNeonToken = selectedIds.includes("neon") || selectedIds.includes("github-secrets");
+	const needsDoToken = selectedIds.includes("droplet");
+	const needsGhcrPat = selectedIds.includes("github-secrets");
+
+	if (needsResendKey) {
+		ui.info(`Create an API key at: ${ui.url("https://resend.com/api-keys")}`);
+		ctx.resendApiKey = await input({
+			message: `${ui.cyan("Resend API key")} ${ui.dim("(starts with re_)")}:`,
+			default: ctx.resendApiKey || undefined,
+			validate: (v) => (v.startsWith("re_") ? true : "API key must start with re_"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	if (needsNeonToken) {
+		ui.info(`Create an API key at: ${ui.url("https://console.neon.tech/app/settings/api-keys")}`);
+		ctx.neonApiToken = await input({
+			message: `${ui.cyan("Neon API token")}:`,
+			default: ctx.neonApiToken || undefined,
+			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	if (needsDoToken) {
+		ui.info(`Create an API token at: ${ui.url("https://cloud.digitalocean.com/account/api/tokens")}`);
+		ctx.doToken = await input({
+			message: `${ui.cyan("DigitalOcean API token")}:`,
+			default: ctx.doToken || undefined,
+			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	if (needsGhcrPat) {
+		ui.info(`Create a PAT at: ${ui.url("https://github.com/settings/tokens")} — scope: ${ui.bold("read:packages")}`);
+		ctx.ghcrPat = await input({
+			message: `${ui.cyan("GitHub PAT")} ${ui.dim("(read:packages)")}:`,
+			default: ctx.ghcrPat || undefined,
+			validate: (v) => (v.length > 0 ? true : "Token cannot be empty"),
+		});
+		saveSettings(ctx, true);
+	}
+
+	// Derive all secrets from passphrase and save to octl.json
+	if (ctx.passphrase) {
+		ctx.derivedSecrets = deriveAllSecrets(ctx.passphrase, ctx.includeSite);
+		saveSettings(ctx, true);
+	}
+
+	// Run selected steps
+	const failedStepIds = new Set<StepId>();
+	const total = selectedSteps.length;
+	for (let i = 0; i < selectedSteps.length; i++) {
+		const step = selectedSteps[i];
+		ui.stepHeader(i + 1, total, step.label);
+
+		let succeeded = false;
+		while (!succeeded) {
+			try {
+				await step.run(ctx);
+				succeeded = true;
+				saveSettings(ctx, true);
+			} catch (err: unknown) {
+				// Save whatever the step collected before it failed
+				saveSettings(ctx, true);
+				ui.error(`Step "${ui.bold(step.label)}" failed: ${err instanceof Error ? err.message : String(err)}`);
+
+				const retry = await confirm({
+					message: "Would you like to retry this step?",
+					default: true,
+				});
+
+				if (retry) {
+					ui.info(`Retrying ${ui.bold(step.label)}…`);
+					continue;
+				}
+
+				const cont = await confirm({
+					message: "Would you like to continue with the remaining steps?",
+					default: true,
+				});
+
+				if (!cont) {
+					ui.info(`Exiting. You can re-run ${ui.cmd("octl prod")} and select only the remaining steps.`);
+					process.exit(1);
+				}
+
+				failedStepIds.add(step.id);
+				break;
+			}
+		}
+	}
+
+	// Final save (loud — shows path to the user)
+	saveSettings(ctx);
+
+	// Summary
+	ui.summaryBox("Deploy Complete");
+	if (ctx.domain) ui.keyValue("Domain", ctx.domain);
+	if (ctx.dropletIp) ui.keyValue("Droplet IP", ctx.dropletIp);
+	if (ctx.neonProjectId) ui.keyValue("Neon Project", ctx.neonProjectId);
+	if (ctx.repoOwner) ui.keyValue("GitHub Org", ctx.repoOwner);
+	if (ctx.adminEmail) ui.keyValue("Admin email", ctx.adminEmail);
+	console.log("");
+
+	// Always print DNS setup instructions if we have domain + IP
+	if (ctx.domain && ctx.dropletIp) {
+		ui.info(ui.bold("DNS Records") + ui.dim(" — add these at your DNS provider:"));
+		console.log("");
+
+		ui.info(ui.bold("A Records") + ui.dim(` → all point to ${ctx.dropletIp}`));
+		ui.table(
+			["Type", "Name", "Value", "TTL"],
+			["login.ciam", "login.iam", "oauth.ciam", "oauth.iam", "admin.ciam", "admin.iam", "olympus"].map((sub) => ["A", sub, ctx.dropletIp, "3600"]),
+		);
+		console.log("");
+	}
+
+	if (ctx.resendDnsRecords.length > 0) {
+		ui.info(ui.bold("Resend Email DNS Records"));
+		ui.table(
+			["Type", "Name", "Value", "Priority"],
+			ctx.resendDnsRecords.map((r) => [
+				r.type,
+				r.name || "(root)",
+				r.value.length > 60 ? `${r.value.substring(0, 57)}...` : r.value,
+				r.priority !== undefined ? String(r.priority) : "",
+			]),
+		);
+		console.log("");
+	}
+}
+
+async function checkPrerequisites(): Promise<void> {
+	const ghAvailable = await commandExists("gh");
+	if (!ghAvailable) {
+		ui.error(`GitHub CLI ${ui.cmd("gh")} is required. Install: ${ui.cmd(installHint("gh"))}`);
+		process.exit(1);
+	}
+	ui.success(`GitHub CLI ${ui.cmd("gh")} found`);
+
+	const sshKeygenAvailable = await commandExists("ssh-keygen");
+	if (!sshKeygenAvailable) {
+		ui.error(`${ui.cmd("ssh-keygen")} is required but not found on PATH`);
+		process.exit(1);
+	}
+}

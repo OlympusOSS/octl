@@ -1,4 +1,10 @@
-/** Steps the user can select from the main menu. */
+/** CLI environment mode. */
+export type Mode = "dev" | "prod";
+
+/** Top-level menu action for prod mode. */
+export type MenuAction = "deploy" | "modify" | "destroy";
+
+/** Steps the user can select from the deploy menu. */
 export type StepId = "resend" | "neon" | "droplet" | "github-secrets" | "github-vars";
 
 export interface StepDef {
@@ -19,11 +25,20 @@ export interface DnsRecord {
 
 /** Accumulated context passed through every step. */
 export interface SetupContext {
+	/** CLI environment mode. */
+	mode: Mode;
+
 	/** Whether this is a demo instance (uses hardcoded demo accounts). */
 	demo: boolean;
 
 	/** Which steps the user selected to run. */
 	selectedSteps: StepId[];
+
+	/** IAM Kratos admin API URL (used by Modify commands). */
+	iamKratosAdminUrl: string;
+
+	/** CIAM Kratos admin API URL (used by Modify commands). */
+	ciamKratosAdminUrl: string;
 
 	/** Base domain (e.g. "nannier.com"). */
 	domain: string;
@@ -118,8 +133,11 @@ export interface SetupContext {
 /** Create an empty context with sane defaults. */
 export function createEmptyContext(): SetupContext {
 	return {
+		mode: "prod",
 		demo: false,
 		selectedSteps: [],
+		iamKratosAdminUrl: "",
+		ciamKratosAdminUrl: "",
 		domain: "",
 		passphrase: "",
 		adminEmail: "",
