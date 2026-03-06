@@ -2,14 +2,14 @@ const DO_API = "https://api.digitalocean.com/v2";
 
 /** Ports that need to be open on the Olympus production droplet. */
 const OLYMPUS_INBOUND_PORTS = [
-	"22",        // SSH
-	"80",        // HTTP (reverse proxy / certbot)
-	"443",       // HTTPS
-	"3001",      // CIAM Hera
-	"3003",      // CIAM Athena
+	"22", // SSH
+	"80", // HTTP (reverse proxy / certbot)
+	"443", // HTTPS
+	"3001", // CIAM Hera
+	"3003", // CIAM Athena
 	"3100-3103", // CIAM Kratos + Hydra
-	"4001",      // IAM Hera
-	"4003",      // IAM Athena
+	"4001", // IAM Hera
+	"4003", // IAM Athena
 	"4100-4103", // IAM Kratos + Hydra
 ];
 
@@ -124,11 +124,7 @@ export async function listRegions(token: string): Promise<Region[]> {
  * Returns the key's ID (number) and fingerprint.
  * If the key already exists (same fingerprint), returns the existing one.
  */
-export async function addSshKey(
-	token: string,
-	name: string,
-	publicKey: string,
-): Promise<{ id: number; fingerprint: string }> {
+export async function addSshKey(token: string, name: string, publicKey: string): Promise<{ id: number; fingerprint: string }> {
 	// First check if a key with this name/fingerprint already exists
 	const listRes = await fetch(`${DO_API}/account/keys?per_page=200`, {
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -136,9 +132,7 @@ export async function addSshKey(
 
 	if (listRes.ok) {
 		const listData = await listRes.json();
-		const existing = (listData.ssh_keys ?? []).find(
-			(k: any) => k.name === name || k.public_key.trim() === publicKey.trim(),
-		);
+		const existing = (listData.ssh_keys ?? []).find((k: any) => k.name === name || k.public_key.trim() === publicKey.trim());
 		if (existing) {
 			return { id: existing.id, fingerprint: existing.fingerprint };
 		}
@@ -234,11 +228,7 @@ export async function assignReservedIp(token: string, ip: string, dropletId: num
  * Idempotent — if a firewall named `name` already exists and targets the droplet, returns it.
  * Otherwise creates a new one with inbound rules for all Olympus service ports.
  */
-export async function ensureFirewall(
-	token: string,
-	dropletId: number,
-	name = "olympusoss-firewall",
-): Promise<{ id: string; name: string }> {
+export async function ensureFirewall(token: string, dropletId: number, name = "olympusoss-firewall"): Promise<{ id: string; name: string }> {
 	const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
 	// Check for existing firewall by name

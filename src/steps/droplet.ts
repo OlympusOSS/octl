@@ -2,7 +2,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { confirm, input, select } from "@inquirer/prompts";
-import { addSshKey, assignReservedIp, createReservedIp, ensureFirewall, listDroplets, listRegions, listReservedIps, listSizes } from "../lib/digitalocean.js";
+import {
+	addSshKey,
+	assignReservedIp,
+	createReservedIp,
+	ensureFirewall,
+	listDroplets,
+	listRegions,
+	listReservedIps,
+	listSizes,
+} from "../lib/digitalocean.js";
 import { commandExists, exec, execOrThrow, installHint } from "../lib/shell.js";
 import * as ui from "../lib/ui.js";
 import type { SetupContext } from "../types.js";
@@ -214,12 +223,7 @@ async function createDroplet(ctx: SetupContext): Promise<number> {
 
 	// Wait for SSH to become available (use the deploy key, no password)
 	ui.info("Waiting for SSH to become available...");
-	const sshOpts = [
-		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "ConnectTimeout=5",
-		"-o", "PasswordAuthentication=no",
-		"-o", "BatchMode=yes",
-	];
+	const sshOpts = ["-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", "-o", "PasswordAuthentication=no", "-o", "BatchMode=yes"];
 	if (ctx.sshPrivateKeyPath) {
 		sshOpts.push("-i", ctx.sshPrivateKeyPath);
 	}
@@ -320,12 +324,7 @@ async function handleReservedIp(ctx: SetupContext, dropletId: number): Promise<v
 
 	// Wait for SSH to become reachable through the reserved IP
 	ui.info(`Waiting for SSH through reserved IP ${ui.host(ip)}...`);
-	const sshOpts = [
-		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "ConnectTimeout=5",
-		"-o", "PasswordAuthentication=no",
-		"-o", "BatchMode=yes",
-	];
+	const sshOpts = ["-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", "-o", "PasswordAuthentication=no", "-o", "BatchMode=yes"];
 	if (ctx.sshPrivateKeyPath) {
 		sshOpts.push("-i", ctx.sshPrivateKeyPath);
 	}
@@ -367,13 +366,7 @@ async function copySshKey(ctx: SetupContext): Promise<void> {
 	const hasSshCopyId = await commandExists("ssh-copy-id");
 
 	if (hasSshCopyId) {
-		const result = await exec("ssh-copy-id", [
-			"-i",
-			ctx.sshPublicKeyPath,
-			"-o",
-			"StrictHostKeyChecking=accept-new",
-			sshTarget,
-		]);
+		const result = await exec("ssh-copy-id", ["-i", ctx.sshPublicKeyPath, "-o", "StrictHostKeyChecking=accept-new", sshTarget]);
 		if (result.exitCode === 0) {
 			ui.success("Deploy key installed on Droplet");
 			return;
@@ -392,8 +385,8 @@ async function copySshKey(ctx: SetupContext): Promise<void> {
 	} else {
 		throw new Error(
 			`Failed to install deploy key on Droplet. ` +
-			`You must manually add the public key to ${ctx.sshUser}@${ctx.dropletIp}:~/.ssh/authorized_keys\n` +
-			`Key file: ${ctx.sshPublicKeyPath}`,
+				`You must manually add the public key to ${ctx.sshUser}@${ctx.dropletIp}:~/.ssh/authorized_keys\n` +
+				`Key file: ${ctx.sshPublicKeyPath}`,
 		);
 	}
 }
@@ -410,12 +403,18 @@ async function verifyDeployKey(ctx: SetupContext): Promise<void> {
 	ui.info(`Public key:  ${ui.cmd(ctx.sshPublicKeyPath)} → Droplet authorized_keys`);
 
 	const sshOpts = [
-		"-i", ctx.sshPrivateKeyPath,
-		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "ConnectTimeout=10",
-		"-o", "PasswordAuthentication=no",
-		"-o", "BatchMode=yes",
-		"-o", "IdentitiesOnly=yes",
+		"-i",
+		ctx.sshPrivateKeyPath,
+		"-o",
+		"StrictHostKeyChecking=accept-new",
+		"-o",
+		"ConnectTimeout=10",
+		"-o",
+		"PasswordAuthentication=no",
+		"-o",
+		"BatchMode=yes",
+		"-o",
+		"IdentitiesOnly=yes",
 	];
 	const sshTarget = `${ctx.sshUser}@${ctx.dropletIp}`;
 
@@ -426,8 +425,8 @@ async function verifyDeployKey(ctx: SetupContext): Promise<void> {
 	} else {
 		throw new Error(
 			`Deploy key verification FAILED. The key at ${ctx.sshPrivateKeyPath} cannot authenticate to ${ctx.dropletIp}.\n` +
-			`This means GitHub Actions will also fail to deploy.\n` +
-			`Ensure the public key (${ctx.sshPublicKeyPath}) is in ${ctx.sshUser}@${ctx.dropletIp}:~/.ssh/authorized_keys`,
+				`This means GitHub Actions will also fail to deploy.\n` +
+				`Ensure the public key (${ctx.sshPublicKeyPath}) is in ${ctx.sshUser}@${ctx.dropletIp}:~/.ssh/authorized_keys`,
 		);
 	}
 }

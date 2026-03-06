@@ -37,8 +37,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 	if (orgId) ctx.neonOrgId = orgId;
 
 	/** Build a Neon API URL, appending org_id if available. */
-	const neonUrl = (path: string) =>
-		orgId ? `${NEON_API}${path}?org_id=${orgId}` : `${NEON_API}${path}`;
+	const neonUrl = (path: string) => (orgId ? `${NEON_API}${path}?org_id=${orgId}` : `${NEON_API}${path}`);
 
 	let projectId = "";
 	let branchId = "";
@@ -57,9 +56,7 @@ export async function run(ctx: SetupContext): Promise<void> {
 
 		if (projects.length > 0) {
 			// Pre-select the saved project if it still exists
-			const savedIdx = ctx.neonProjectId
-				? projects.findIndex((p) => p.id === ctx.neonProjectId)
-				: -1;
+			const savedIdx = ctx.neonProjectId ? projects.findIndex((p) => p.id === ctx.neonProjectId) : -1;
 
 			const choices = [
 				...projects.map((p) => ({
